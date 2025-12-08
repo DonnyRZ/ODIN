@@ -1,0 +1,1619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ODIN Workspace - AI Assistant for PowerPoint Creation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Color Palette - From Design Spec */
+            --primary-purple: #7C3AED;
+            --primary-dark: #1F2937;
+            --primary-gray: #6B7280;
+            --success-green: #10B981;
+            --error-red: #EF4444;
+            --warning-amber: #F59E0B;
+            --info-blue: #3B82F6;
+            --background-light: #FFFFFF;
+            --surface-gray: #F9FAFB;
+            --border-light: #E5E7EB;
+            --border-medium: #D1D5DB;
+            
+            /* Typography - From Design Spec */
+            --font-primary: 'Inter', -apple-system, sans-serif;
+            --h1: 32px/1.2 700;
+            --h2: 24px/1.3 600;
+            --h3: 20px/1.3 600;
+            --body: 16px/1.5 400;
+            --small: 14px/1.4 400;
+            --micro: 12px/1.3 400;
+            
+            /* Spacing - From Design Spec */
+            --space-xs: 4px;
+            --space-s: 8px;
+            --space-m: 16px;
+            --space-l: 24px;
+            --space-xl: 32px;
+            --space-xxl: 48px;
+            
+            /* Effects */
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-full: 9999px;
+        }
+
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: var(--font-primary);
+            background-color: var(--background-light);
+            color: var(--primary-dark);
+            line-height: 1.5;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        /* Layout */
+        .workspace-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        /* Main Content Area */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: #F8FAFC;
+        }
+        
+        /* Header */
+        .workspace-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--space-m) var(--space-xl);
+            background-color: var(--background-light);
+            border-bottom: 1px solid var(--border-light);
+            min-height: 72px;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: var(--space-l);
+        }
+        
+        .back-button {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+            padding: var(--space-s) var(--space-m);
+            background: none;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            color: var(--primary-gray);
+            font: var(--small);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .back-button:hover {
+            border-color: var(--border-medium);
+            background-color: var(--surface-gray);
+            color: var(--primary-dark);
+        }
+        
+        .project-info {
+            display: flex;
+            align-items: center;
+            gap: var(--space-s);
+        }
+        
+        .project-icon {
+            width: 32px;
+            height: 32px;
+            background-color: rgba(124, 58, 237, 0.1);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary-purple);
+        }
+        
+        .project-title {
+            font: var(--h3);
+            color: var(--primary-dark);
+        }
+        
+        .auto-save-indicator {
+            font: var(--micro);
+            color: var(--primary-gray);
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+            padding: 2px var(--space-s);
+            background-color: var(--surface-gray);
+            border-radius: var(--radius-full);
+        }
+        
+        .save-indicator-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: var(--success-green);
+        }
+        
+        .saving .save-indicator-dot {
+            animation: pulse 1.5s infinite;
+            background-color: var(--warning-amber);
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: var(--space-m);
+        }
+        
+        .action-button {
+            padding: var(--space-s) var(--space-m);
+            background: none;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            color: var(--primary-gray);
+            font: var(--small);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+        }
+        
+        .action-button:hover {
+            border-color: var(--border-medium);
+            background-color: var(--surface-gray);
+            color: var(--primary-dark);
+        }
+        
+        /* ============================================
+           FIXED MAIN WORKSPACE LAYOUT - PHASE 1
+           ============================================ */
+        .workspace-content {
+            flex: 1;
+            display: grid;
+            grid-template-columns: minmax(680px, 1fr) 380px;
+            gap: 0;
+            padding: 0 var(--space-xl) var(--space-xl);
+            align-items: start;
+        }
+
+        /* ============================================
+           FIXED CANVAS COLUMN - PHASE 2
+           ============================================ */
+        .canvas-column {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-m);
+            min-width: 0;
+            position: sticky;
+            top: 0;
+            height: calc(100vh - var(--space-xl));
+        }
+
+        .slide-panel {
+            display: flex;
+            flex-direction: column;
+            background-color: var(--background-light);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-light);
+            overflow: hidden;
+            min-width: 0;
+            flex: 1;
+        }
+        
+        .panel-header {
+            padding: var(--space-l) var(--space-l) var(--space-s);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .panel-title {
+            font: var(--h3);
+            color: var(--primary-dark);
+        }
+        
+        .canvas-toolbar {
+            padding: 0 var(--space-l) var(--space-m);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: var(--space-l);
+            border-bottom: 1px solid var(--border-light);
+        }
+        
+        .panel-actions {
+            display: inline-flex;
+            gap: var(--space-xs);
+            flex-wrap: wrap;
+        }
+        
+        .tool-button {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            background-color: var(--background-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--primary-gray);
+            transition: all 0.2s ease;
+        }
+        
+        .tool-button:hover {
+            border-color: var(--border-medium);
+            background-color: var(--surface-gray);
+            color: var(--primary-dark);
+        }
+        
+        .tool-button.active {
+            border-color: var(--primary-purple);
+            background-color: rgba(124, 58, 237, 0.08);
+            color: var(--primary-purple);
+        }
+
+        .toolbar-shortcuts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-xs);
+            color: var(--primary-gray);
+            font: var(--micro);
+        }
+
+        .toolbar-shortcuts span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        /* FIXED SLIDE PREVIEW - CRITICAL: 16:9 Landscape */
+        .slide-canvas-container {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-xl);
+            background: 
+                linear-gradient(45deg, #F8FAFC 25%, transparent 25%), 
+                linear-gradient(-45deg, #F8FAFC 25%, transparent 25%), 
+                linear-gradient(45deg, transparent 75%, #F8FAFC 75%), 
+                linear-gradient(-45deg, transparent 75%, #F8FAFC 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            min-height: 400px;
+        }
+        
+        .slide-preview-stage {
+            /* ENFORCE 16:9 ASPECT RATIO */
+            aspect-ratio: 16 / 9;
+            width: 100%;
+            max-width: 100%; /* Prevent overflow */
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+            background-color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .slide-preview {
+            /* Make image fit perfectly within landscape container */
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* No distortion, shows full slide */
+            display: block;
+        }
+        
+        /* Selection Rectangle */
+        .selection-rectangle {
+            position: absolute;
+            border: 2px dashed var(--primary-purple);
+            background-color: rgba(124, 58, 237, 0.1);
+            cursor: move;
+            z-index: 10;
+        }
+        
+        .selection-info {
+            position: absolute;
+            bottom: -40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: var(--primary-dark);
+            color: white;
+            padding: var(--space-xs) var(--space-s);
+            border-radius: var(--radius-sm);
+            font: var(--micro);
+            font-weight: 600;
+            white-space: nowrap;
+            z-index: 20;
+        }
+        
+        .selection-info::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-bottom: 4px solid var(--primary-dark);
+        }
+        
+        .snap-badge {
+            position: absolute;
+            top: -28px;
+            right: 0;
+            background-color: var(--success-green);
+            color: white;
+            padding: 2px var(--space-s);
+            border-radius: var(--radius-full);
+            font: var(--micro);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        /* ============================================
+           FIXED CONSOLE COLUMN - PHASE 3
+           ============================================ */
+        .console-column {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xl);
+            max-height: calc(100vh - var(--space-xl));
+            overflow-y: auto;
+            padding-right: var(--space-s);
+            margin-left: var(--space-xl);
+        }
+
+        .controls-panel {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xl);
+        }
+        
+        /* Input Card */
+        .input-card {
+            background-color: var(--background-light);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-light);
+            padding: var(--space-l);
+        }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-s);
+            margin-bottom: var(--space-m);
+        }
+        
+        .card-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-md);
+            background-color: rgba(124, 58, 237, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary-purple);
+        }
+        
+        .card-title {
+            font: var(--h3);
+            color: var(--primary-dark);
+        }
+        
+        .card-description {
+            font: var(--small);
+            color: var(--primary-gray);
+            margin-bottom: var(--space-l);
+        }
+        
+        /* Text Input */
+        .text-input-container {
+            position: relative;
+        }
+        
+        .text-area {
+            width: 100%;
+            min-height: 140px;
+            padding: var(--space-m);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            font: var(--body);
+            color: var(--primary-dark);
+            resize: vertical;
+            transition: all 0.2s ease;
+            background-color: var(--background-light);
+        }
+        
+        .text-area:focus {
+            outline: none;
+            border-color: var(--primary-purple);
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+        }
+        
+        .text-area::placeholder {
+            color: var(--primary-gray);
+        }
+        
+        .input-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: var(--space-s);
+        }
+        
+        .char-count {
+            font: var(--micro);
+            color: var(--primary-gray);
+        }
+        
+        .char-count.warning {
+            color: var(--warning-amber);
+        }
+        
+        .validation-icon {
+            color: var(--success-green);
+            display: none;
+        }
+        
+        .has-text .validation-icon {
+            display: block;
+        }
+        
+        /* Color Detection */
+        .color-detection {
+            margin-top: var(--space-l);
+            padding-top: var(--space-l);
+            border-top: 1px solid var(--border-light);
+        }
+        
+        .detection-title {
+            font: var(--small);
+            font-weight: 600;
+            color: var(--primary-dark);
+            margin-bottom: var(--space-s);
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+        }
+        
+        .color-palette {
+            display: flex;
+            gap: var(--space-s);
+            margin-top: var(--space-s);
+        }
+        
+        .color-swatch {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            position: relative;
+        }
+        
+        .color-swatch.primary::after {
+            content: 'Primary';
+            position: absolute;
+            bottom: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font: var(--micro);
+            color: var(--primary-gray);
+            white-space: nowrap;
+        }
+        
+        .style-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: var(--space-xs) var(--space-s);
+            background-color: rgba(124, 58, 237, 0.1);
+            color: var(--primary-purple);
+            border-radius: var(--radius-full);
+            font: var(--micro);
+            font-weight: 600;
+            margin-top: var(--space-s);
+        }
+        
+        /* Generate Card */
+        .generate-card {
+            background-color: var(--background-light);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-light);
+            padding: var(--space-l);
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .generate-button {
+            width: 100%;
+            padding: var(--space-l);
+            background-color: var(--primary-purple);
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            font: var(--h3);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-s);
+            margin-bottom: var(--space-l);
+        }
+        
+        .generate-button:hover:not(:disabled) {
+            background-color: #6D28D9;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(124, 58, 237, 0.3);
+        }
+        
+        .generate-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .generate-button.loading {
+            background-color: #8B5CF6;
+        }
+        
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .generate-stats {
+            font: var(--small);
+            color: var(--primary-gray);
+            text-align: center;
+            margin-bottom: var(--space-m);
+        }
+        
+        .estimated-time {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-xs);
+            font: var(--small);
+            color: var(--primary-gray);
+            margin-top: var(--space-s);
+        }
+        
+        /* Results Panel */
+        .output-panel {
+            background-color: var(--background-light);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-light);
+            padding: var(--space-l);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-l);
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .results-panel {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-m);
+        }
+        
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-l);
+        }
+        
+        .results-title {
+            font: var(--h3);
+            color: var(--primary-dark);
+        }
+        
+        .results-count {
+            font: var(--small);
+            color: var(--primary-gray);
+        }
+        
+        .results-grid {
+            display: flex;
+            gap: var(--space-m);
+            overflow-x: auto;
+            padding-bottom: var(--space-s);
+        }
+        
+        .result-card {
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: 
+                linear-gradient(45deg, #F8FAFC 25%, transparent 25%), 
+                linear-gradient(-45deg, #F8FAFC 25%, transparent 25%), 
+                linear-gradient(45deg, transparent 75%, #F8FAFC 75%), 
+                linear-gradient(-45deg, transparent 75%, #F8FAFC 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+        }
+        
+        .result-card:hover {
+            border-color: var(--primary-purple);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .result-card.selected {
+            border-color: var(--primary-purple);
+            border-width: 2px;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+        }
+        
+        .result-image {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: contain;
+            padding: var(--space-m);
+            background-color: transparent;
+        }
+        
+        .result-actions {
+            position: absolute;
+            top: var(--space-s);
+            right: var(--space-s);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            display: flex;
+            gap: var(--space-xs);
+        }
+        
+        .result-card:hover .result-actions {
+            opacity: 1;
+        }
+        
+        .result-action-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-md);
+            background-color: var(--background-light);
+            border: 1px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary-gray);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .result-action-btn:hover {
+            background-color: var(--primary-purple);
+            border-color: var(--primary-purple);
+            color: white;
+        }
+        
+        .selected-badge {
+            position: absolute;
+            top: var(--space-s);
+            left: var(--space-s);
+            background-color: var(--primary-purple);
+            color: white;
+            padding: 2px var(--space-s);
+            border-radius: var(--radius-full);
+            font: var(--micro);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .results-footer {
+            border-top: 1px solid var(--border-light);
+            padding-top: var(--space-l);
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: var(--space-m);
+            align-items: center;
+        }
+        
+        .selected-result {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+        }
+        
+        .selected-label {
+            font: var(--small);
+            color: var(--primary-gray);
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: var(--space-s);
+            flex-wrap: wrap;
+        }
+        
+        .download-btn, .copy-btn {
+            padding: var(--space-s) var(--space-l);
+            border-radius: var(--radius-md);
+            font: var(--small);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid;
+        }
+        
+        .download-btn {
+            background-color: var(--background-light);
+            border-color: var(--border-light);
+            color: var(--primary-dark);
+        }
+        
+        .download-btn:hover {
+            background-color: var(--surface-gray);
+            border-color: var(--border-medium);
+        }
+        
+        .copy-btn {
+            background-color: var(--primary-purple);
+            border-color: var(--primary-purple);
+            color: white;
+        }
+        
+        .copy-btn:hover {
+            background-color: #6D28D9;
+            border-color: #6D28D9;
+        }
+        
+        /* Empty Results */
+        .empty-results {
+            grid-column: 1 / -1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-xxl) var(--space-xl);
+            text-align: center;
+        }
+        
+        .empty-icon {
+            font-size: 48px;
+            color: var(--border-medium);
+            margin-bottom: var(--space-l);
+        }
+        
+        .empty-title {
+            font: var(--h3);
+            margin-bottom: var(--space-s);
+            color: var(--primary-dark);
+        }
+        
+        .empty-description {
+            font: var(--body);
+            color: var(--primary-gray);
+            max-width: 300px;
+            margin-bottom: var(--space-l);
+        }
+        
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: var(--space-xl);
+            right: var(--space-xl);
+            background-color: var(--success-green);
+            color: white;
+            padding: var(--space-l);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            gap: var(--space-m);
+            z-index: 1000;
+            animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s forwards;
+        }
+
+        /* Accessibility & Interaction Enhancements */
+        .visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        button:focus-visible,
+        .tool-button:focus-visible,
+        .result-card:focus-visible,
+        .color-swatch:focus-visible {
+            outline: 3px solid rgba(124, 58, 237, 0.45);
+            outline-offset: 2px;
+        }
+
+        .color-swatch {
+            cursor: pointer;
+        }
+
+        .color-swatch:focus-visible {
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+        }
+
+        .color-swatch.highlight {
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.5);
+        }
+
+        /* Keyboard Shortcuts List */
+        .shortcut-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-s);
+            margin-top: var(--space-m);
+        }
+
+        .shortcut-list li {
+            display: flex;
+            align-items: center;
+            gap: var(--space-m);
+            font: var(--small);
+            color: var(--primary-gray);
+        }
+
+        /* Results as Radio Group */
+        .results-grid[role="radiogroup"] {
+            gap: var(--space-m);
+        }
+
+        .result-card[role="radio"] {
+            cursor: pointer;
+            outline: none;
+        }
+
+        /* Export Format Options */
+        .export-advanced {
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: var(--space-m);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-s);
+        }
+
+        .export-label {
+            font: var(--micro);
+            color: var(--primary-gray);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .export-buttons {
+            display: flex;
+            gap: var(--space-s);
+            flex-wrap: wrap;
+        }
+
+        .export-format-btn {
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-full);
+            background-color: var(--surface-gray);
+            color: var(--primary-dark);
+            padding: var(--space-xs) var(--space-m);
+            font: var(--micro);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .export-format-btn.is-active {
+            background-color: var(--primary-purple);
+            border-color: var(--primary-purple);
+            color: white;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+        }
+
+        /* Shortcut Pill */
+        .shortcut-pill {
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-full);
+            padding: 0 var(--space-xs);
+            font: var(--micro);
+            color: var(--primary-gray);
+            background-color: var(--surface-gray);
+            line-height: 1.6;
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+        }
+        
+        .toast-icon {
+            font-size: 20px;
+        }
+        
+        .toast-content {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+        }
+        
+        .toast-title {
+            font: var(--small);
+            font-weight: 600;
+        }
+        
+        .toast-message {
+            font: var(--micro);
+            opacity: 0.9;
+        }
+        
+        /* ============================================
+           RESPONSIVE BEHAVIOR - PHASE 4
+           ============================================ */
+        @media (max-width: 1100px) {
+            .workspace-content {
+                /* Stack vertically on tablets */
+                grid-template-columns: 1fr;
+                grid-template-rows: auto minmax(400px, auto);
+                max-height: none;
+                overflow-y: auto;
+                gap: var(--space-l);
+            }
+
+            .console-column {
+                border-left: none;
+                border-top: 1px solid var(--border-light);
+                padding-left: 0;
+                padding-top: var(--space-xl);
+                height: auto;
+                max-height: 60vh; /* Limit height on stacked layout */
+            }
+
+            .slide-preview-stage {
+                max-width: 900px;
+                margin: 0 auto;
+            }
+
+            .session-panel {
+                margin-top: var(--space-l);
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .workspace-header {
+                padding: var(--space-m) var(--space-l);
+                flex-direction: column;
+                gap: var(--space-m);
+                align-items: stretch;
+            }
+            
+            .workspace-content {
+                padding: var(--space-l);
+            }
+            
+            .header-left, .header-actions {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .canvas-toolbar {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: var(--space-m);
+            }
+
+            .toolbar-shortcuts {
+                align-self: stretch;
+                justify-content: space-between;
+            }
+
+            .results-grid {
+                flex-direction: column;
+            }
+
+            .results-footer {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .action-buttons {
+                width: 100%;
+            }
+
+            .download-btn, .copy-btn {
+                flex: 1;
+                text-align: center;
+            }
+            
+            .project-title {
+                font-size: 16px;
+            }
+            
+            .step-label {
+                font-size: 12px;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .workspace-content {
+                grid-template-columns: 1fr;
+            }
+            .canvas-column {
+                position: static;
+                height: auto;
+            }
+            .console-column {
+                max-height: none;
+                overflow: visible;
+                border-left: none;
+                padding-left: 0;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .workspace-content {
+                grid-template-columns: 1fr;
+                padding: var(--space-m);
+            }
+
+            .canvas-column {
+                position: static;
+                height: auto;
+            }
+
+            .console-column {
+                max-height: none;
+                overflow: visible;
+                margin-left: 0;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .generate-button {
+                flex-direction: column;
+                padding: var(--space-m);
+            }
+
+            .export-buttons {
+                justify-content: center;
+            }
+        }
+        </style>
+</head>
+<body>
+    <div class="workspace-container">
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Header -->
+            <header class="workspace-header">
+                <div class="header-left">
+                    <button class="back-button" aria-label="Back to home screen">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M10 12L6 8L10 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        Back to Home
+                    </button>
+                    
+                    <div class="project-info">
+                        <div class="project-icon" role="img" aria-label="Pitch deck project icon">
+                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M3 4C3 2.89543 3.89543 2 5 2H15C16.1046 2 17 2.89543 17 4V16C17 17.1046 16.1046 18 15 18H5C3.89543 18 3 17.1046 3 16V4Z" fill="currentColor"/>
+                                <path d="M7 6H13V8H7V6ZM7 10H13V12H7V10ZM7 14H10V16H7V14Z" fill="white"/>
+                            </svg>
+                        </div>
+                        <h2 class="project-title">Pitch Deck - Q1 2025</h2>
+                        <span class="auto-save-indicator saving" role="status" aria-live="polite">
+                            <span class="save-indicator-dot"></span>
+                            Saving...
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="header-actions">
+                    <button class="action-button" aria-label="Open help center">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M8 0C3.58 0 0 3.58 0 8C0 12.42 3.58 16 8 16C12.42 16 16 12.42 16 8C16 3.58 12.42 0 8 0ZM8 14C4.69 14 2 11.31 2 8C2 4.69 4.69 2 8 2C11.31 2 14 4.69 14 8C14 11.31 11.31 14 8 14ZM8 4C5.79 4 4 5.79 4 8C4 10.21 5.79 12 8 12C10.21 12 12 10.21 12 8C12 5.79 10.21 4 8 4Z" fill="currentColor"/>
+                        </svg>
+                        Help
+                    </button>
+                    <button class="action-button" aria-label="Create a new slide">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M14 0H2C0.9 0 0 0.9 0 2V14C0 15.1 0.9 16 2 16H14C15.1 16 16 15.1 16 14V2C16 0.9 15.1 0 14 0ZM2 2H8V14H2V2Z" fill="currentColor"/>
+                        </svg>
+                        New Slide
+                    </button>
+                </div>
+            </header>
+
+            <!-- Fixed Main Workspace -->
+            <div class="workspace-content">
+                <!-- Dominant Canvas Column -->
+                <div class="canvas-column">
+                    <div class="slide-panel">
+                        <div class="panel-header">
+                            <h3 class="panel-title">Slide Preview</h3>
+                        </div>
+                        <div class="canvas-toolbar" role="toolbar" aria-label="Canvas tools">
+                            <div class="panel-actions">
+                                <button class="tool-button" title="Zoom In" aria-label="Zoom in" aria-pressed="false">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M7 7V3H9V7H13V9H9V13H7V9H3V7H7ZM8 0C3.58 0 0 3.58 0 8C0 12.42 3.58 16 8 16C12.42 16 16 12.42 16 8C16 3.58 12.42 0 8 0ZM8 14C4.69 14 2 11.31 2 8C2 4.69 4.69 2 8 2C11.31 2 14 4.69 14 8C14 11.31 11.31 14 8 14Z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                                <button class="tool-button" title="Zoom Out" aria-label="Zoom out" aria-pressed="false">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M3 7H13V9H3V7ZM8 0C3.58 0 0 3.58 0 8C0 12.42 3.58 16 8 16C12.42 16 16 12.42 16 8C16 3.58 12.42 0 8 0ZM8 14C4.69 14 2 11.31 2 8C2 4.69 4.69 2 8 2C11.31 2 14 4.69 14 8C14 11.31 11.31 14 8 14Z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                                <button class="tool-button active" title="Draw Tool" aria-label="Draw tool" aria-pressed="true">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                                    </svg>
+                                </button>
+                                <button class="tool-button" title="Pan Tool" aria-label="Pan tool" aria-pressed="false">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M8 0L10.5 5.5H5.5L8 0Z" fill="currentColor"/>
+                                        <path d="M16 8L10.5 5.5V10.5L16 8Z" fill="currentColor"/>
+                                        <path d="M8 16L5.5 10.5H10.5L8 16Z" fill="currentColor"/>
+                                        <path d="M0 8L5.5 10.5V5.5L0 8Z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                                <button class="tool-button" title="Reset View" aria-label="Reset view" aria-pressed="false">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M8 3V0L4 4L8 8V5C10.21 5 12 6.79 12 9C12 11.21 10.21 13 8 13C5.79 13 4 11.21 4 9H2C2 12.31 4.69 15 8 15C11.31 15 14 12.31 14 9C14 5.69 11.31 3 8 3Z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="toolbar-shortcuts" aria-hidden="true">
+                                <span><span class="shortcut-pill">Z</span> Zoom</span>
+                                <span><span class="shortcut-pill">D</span> Draw</span>
+                                <span><span class="shortcut-pill">H</span> Pan</span>
+                                <span><span class="shortcut-pill">Shift</span> Snap to grid</span>
+                            </div>
+                        </div>
+                        
+                        <div class="slide-canvas-container"></div>
+                    </div>
+
+                    <!-- Session Panel (Below Canvas) -->
+                </div>
+
+                <!-- Fixed Console Column (Controls) -->
+                <div class="console-column">
+                    <div class="controls-panel">
+                        <!-- Input Card -->
+                        <div class="input-card" aria-label="Prompt controls">
+                            <div class="card-header">
+                                <div class="card-icon">
+                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M0 4C0 2.89543 0.89543 2 2 2H18C19.1046 2 20 2.89543 20 4V16C20 17.1046 19.1046 18 18 18H2C0.89543 18 0 17.1046 0 16V4Z" fill="currentColor"/>
+                                        <path d="M4 6H16V8H4V6ZM4 10H16V12H4V10ZM4 14H10V16H4V14Z" fill="white"/>
+                                    </svg>
+                                </div>
+                                <h3 class="card-title">Slide Content</h3>
+                            </div>
+                            
+                            <p class="card-description">
+                                Describe what this slide is about. More details help generate better visuals.
+                            </p>
+                            
+                            <div class="text-input-container" id="promptContainer">
+                                <label for="promptInput" class="visually-hidden">Describe the visual you want ODIN to create</label>
+                                <textarea class="text-area" id="promptInput" maxlength="500" aria-describedby="promptCount" placeholder="Paste slide title and bullet points here...">Market Growth Strategy
+
+• Expanding into new markets in 2025
+• Targeting 30% revenue increase
+• Focus on sustainability initiatives
+• New partnerships with tech companies</textarea>
+                                
+                                <div class="input-footer">
+                                    <span id="promptHelper" class="char-count">Use nouns + actions for best results</span>
+                                    <div class="char-count" id="promptCount" aria-live="polite">147 / 500</div>
+                                </div>
+                            </div>
+                            
+                            <div class="color-detection">
+                                <div class="detection-title">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M8 0C3.58 0 0 3.58 0 8C0 12.42 3.58 16 8 16C12.42 16 16 12.42 16 8C16 3.58 12.42 0 8 0ZM8 14C4.69 14 2 11.31 2 8C2 4.69 4.69 2 8 2C11.31 2 14 4.69 14 8C14 11.31 11.31 14 8 14Z" fill="#7C3AED"/>
+                                        <path d="M8 4C5.79 4 4 5.79 4 8C4 10.21 5.79 12 8 12C10.21 12 12 10.21 12 8C12 5.79 10.21 4 8 4Z" fill="#7C3AED"/>
+                                    </svg>
+                                    Detected Style
+                                </div>
+                                
+                                <div class="color-palette">
+                                    <div class="color-swatch primary" role="button" tabindex="0" aria-label="Primary color #1E40AF" title="#1E40AF" style="background-color: #1E40AF;"></div>
+                                    <div class="color-swatch" role="button" tabindex="0" aria-label="Accent color #3B82F6" title="#3B82F6" style="background-color: #3B82F6;"></div>
+                                    <div class="color-swatch" role="button" tabindex="0" aria-label="Accent color #60A5FA" title="#60A5FA" style="background-color: #60A5FA;"></div>
+                                    <div class="color-swatch" role="button" tabindex="0" aria-label="Accent color #93C5FD" title="#93C5FD" style="background-color: #93C5FD;"></div>
+                                    <div class="color-swatch" role="button" tabindex="0" aria-label="Neutral color #DBEAFE" title="#DBEAFE" style="background-color: #DBEAFE;"></div>
+                                </div>
+                                
+                                <div class="style-badge">
+                                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M10 3L4.5 8.5L2 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    Flat & Minimal Style
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Generate Card -->
+                        <div class="generate-card">
+                            <button class="generate-button" id="generateBtn" aria-describedby="generationMeta">
+                                <span>Generate 3 Visuals</span>
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M15 10L10 15M15 10L10 5M15 10H5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                            
+                            <div class="generate-stats" id="generationMeta">
+                                Takes 4–8 seconds • 3 variations guaranteed
+                            </div>
+                            
+                            <div class="estimated-time" aria-live="polite">
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M7 0C3.13401 0 0 3.13401 0 7C0 10.866 3.13401 14 7 14C10.866 14 14 10.866 14 7C14 3.13401 10.866 0 7 0ZM7 12.6C3.90721 12.6 1.4 10.0928 1.4 7C1.4 3.90721 3.90721 1.4 7 1.4C10.0928 1.4 12.6 3.90721 12.6 7C12.6 10.0928 10.0928 12.6 7 12.6ZM7.7 7H10.5V8.4H6.3V3.5H7.7V7Z" fill="#6B7280"/>
+                                </svg>
+                                Estimated: 5 seconds remaining
+                            </div>
+
+                            <ul class="shortcut-list" id="keyboardShortcuts" aria-label="Keyboard shortcuts">
+                                <li>
+                                    <span class="shortcut-pill">⌘ + Enter</span>
+                                    <span>Generate visuals</span>
+                                </li>
+                                <li>
+                                    <span class="shortcut-pill">V</span>
+                                    <span>Version history</span>
+                                </li>
+                                <li>
+                                    <span class="shortcut-pill">Shift + Drag</span>
+                                    <span>Resize selection precisely</span>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <!-- Results Panel -->
+                        <div class="output-panel">
+                            <div class="results-panel">
+                                <div class="results-header">
+                                    <h3 class="results-title">Generated Visuals</h3>
+                                    <span class="results-count">3 options</span>
+                                </div>
+                                
+                                <div class="results-grid" role="radiogroup" aria-label="Generated visual options">
+                                    <div class="result-card selected" role="radio" tabindex="0" aria-checked="true" aria-label="Generated visual option 1">
+                                        <div class="selected-badge">
+                                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M10 3L4.5 8.5L2 6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                            Selected
+                                        </div>
+                                        <div class="result-actions">
+                                            <button class="result-action-btn" title="Refresh">
+                                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M8 3V0L4 4L8 8V5C10.21 5 12 6.79 12 9C12 11.21 10.21 13 8 13C5.79 13 4 11.21 4 9H2C2 12.31 4.69 15 8 15C11.31 15 14 12.31 14 9C14 5.69 11.31 3 8 3Z" fill="currentColor"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                        <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Generated visual 1" class="result-image">
+                                    </div>
+                                    
+                                    <div class="result-card" role="radio" tabindex="-1" aria-checked="false" aria-label="Generated visual option 2">
+                                        <div class="result-actions">
+                                            <button class="result-action-btn" title="Refresh">
+                                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M8 3V0L4 4L8 8V5C10.21 5 12 6.79 12 9C12 11.21 10.21 13 8 13C5.79 13 4 11.21 4 9H2C2 12.31 4.69 15 8 15C11.31 15 14 12.31 14 9C14 5.69 11.31 3 8 3Z" fill="currentColor"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                        <img src="https://images.unsplash.com/photo-1556761175-b413da4baf72?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Generated visual 2" class="result-image">
+                                    </div>
+                                    
+                                    <div class="result-card" role="radio" tabindex="-1" aria-checked="false" aria-label="Generated visual option 3">
+                                        <div class="result-actions">
+                                            <button class="result-action-btn" title="Refresh">
+                                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M8 3V0L4 4L8 8V5C10.21 5 12 6.79 12 9C12 11.21 10.21 13 8 13C5.79 13 4 11.21 4 9H2C2 12.31 4.69 15 8 15C11.31 15 14 12.31 14 9C14 5.69 11.31 3 8 3Z" fill="currentColor"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                        <img src="https://images.unsplash.com/photo-1552664730-d307ca884978?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Generated visual 3" class="result-image">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="results-footer">
+                                <div class="selected-result">
+                                    <strong>Selected visual ready to use</strong>
+                                    <div class="selected-label">Choose a format or copy directly.</div>
+                                </div>
+                                <div class="action-buttons">
+                                    <button class="download-btn" aria-label="Download selected visual">
+                                        Download Selected
+                                    </button>
+                                    <button class="copy-btn" id="copyBtn" aria-label="Copy selected visual to clipboard">
+                                        Copy to Clipboard
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="export-advanced" role="group" aria-label="Export format options">
+                                <span class="export-label">Advanced export formats</span>
+                                <div class="export-buttons">
+                                    <button class="export-format-btn" type="button" data-format="PNG">PNG</button>
+                                    <button class="export-format-btn" type="button" data-format="SVG">SVG</button>
+                                    <button class="export-format-btn" type="button" data-format="PPTX">PPTX</button>
+                                </div>
+                                <p class="micro-copy">SVG preserves vectors • PPTX inserts directly into your deck.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast" role="status" aria-live="polite" style="display: none;">
+        <div class="toast-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M20 6L9 17L4 12" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </div>
+        <div class="toast-content">
+            <div class="toast-title">Copied to clipboard!</div>
+            <div class="toast-message">Paste (⌘+V) into your slide</div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const generateBtn = document.getElementById('generateBtn');
+            const copyBtn = document.getElementById('copyBtn');
+            const toast = document.getElementById('toast');
+            const promptInput = document.getElementById('promptInput');
+            const promptCount = document.getElementById('promptCount');
+            const promptContainer = document.getElementById('promptContainer');
+            const maxChars = promptInput ? parseInt(promptInput.getAttribute('maxlength'), 10) : 0;
+            const saveIndicator = document.querySelector('.auto-save-indicator');
+            const downloadBtn = document.querySelector('.download-btn');
+
+            // Update prompt character count
+            const updatePromptMeta = () => {
+                if (!promptInput || !promptCount) return;
+                const trimmedLength = promptInput.value.trim().length;
+                promptCount.textContent = maxChars ? `${trimmedLength} / ${maxChars}` : `${trimmedLength} chars`;
+                promptCount.classList.toggle('warning', maxChars && (maxChars - trimmedLength) <= 50);
+                if (promptContainer) {
+                    promptContainer.classList.toggle('has-text', trimmedLength > 0);
+                }
+            };
+
+            if (promptInput) {
+                updatePromptMeta();
+                promptInput.addEventListener('input', updatePromptMeta);
+            }
+
+            // Toast notification functions
+            const toggleToast = (visible) => {
+                if (!toast) return;
+                toast.style.display = visible ? 'flex' : 'none';
+                toast.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            };
+
+            if (toast) {
+                toast.setAttribute('aria-hidden', 'true');
+            }
+
+            // Generate button functionality
+            if (generateBtn) {
+                generateBtn.setAttribute('aria-busy', 'false');
+                generateBtn.addEventListener('click', function() {
+                    if (generateBtn.classList.contains('loading')) return;
+
+                    generateBtn.classList.add('loading');
+                    generateBtn.setAttribute('aria-busy', 'true');
+                    generateBtn.innerHTML = '<div class="loading-spinner"></div><span>Generating...</span>';
+
+                    // Simulate generation time
+                    setTimeout(() => {
+                        generateBtn.classList.remove('loading');
+                        generateBtn.setAttribute('aria-busy', 'false');
+                        generateBtn.innerHTML = '<span>Generate 3 Visuals</span><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 10L10 15M15 10L10 5M15 10H5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+                    }, 5000);
+                });
+            }
+
+            // Copy button functionality
+            if (copyBtn) {
+                copyBtn.addEventListener('click', function() {
+                    toggleToast(true);
+                    setTimeout(() => toggleToast(false), 3000);
+                });
+            }
+
+            // Result cards selection
+            const resultCards = Array.from(document.querySelectorAll('.result-card[role="radio"]'));
+            const selectResult = (targetCard) => {
+                resultCards.forEach(card => {
+                    const isSelected = card === targetCard;
+                    card.classList.toggle('selected', isSelected);
+                    card.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+                    card.setAttribute('tabindex', isSelected ? '0' : '-1');
+                });
+            };
+
+            // Keyboard navigation for result cards
+            const focusResultByOffset = (currentCard, offset) => {
+                if (!resultCards.length) return;
+                const currentIndex = Number(currentCard.dataset.resultIndex) || 0;
+                const nextIndex = (currentIndex + offset + resultCards.length) % resultCards.length;
+                const nextCard = resultCards[nextIndex];
+                selectResult(nextCard);
+                nextCard.focus();
+            };
+
+            // Initialize result cards
+            resultCards.forEach((card, index) => {
+                card.dataset.resultIndex = index;
+                card.addEventListener('click', () => selectResult(card));
+                card.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        selectResult(card);
+                    }
+                    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        focusResultByOffset(card, 1);
+                    }
+                    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        focusResultByOffset(card, -1);
+                    }
+                });
+            });
+
+            // Tool buttons functionality
+            const toolButtons = document.querySelectorAll('.tool-button');
+            const setActiveTool = (activeButton) => {
+                toolButtons.forEach(button => {
+                    const isActive = button === activeButton;
+                    button.classList.toggle('active', isActive);
+                    button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                });
+            };
+
+            toolButtons.forEach(button => {
+                button.addEventListener('click', () => setActiveTool(button));
+                button.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        button.click();
+                    }
+                });
+            });
+
+            // Auto-save indicator simulation
+            const updateSaveState = (isSaving) => {
+                if (!saveIndicator) return;
+                saveIndicator.classList.toggle('saving', isSaving);
+                saveIndicator.innerHTML = `<span class="save-indicator-dot"></span>${isSaving ? 'Saving...' : 'Saved'}`;
+                saveIndicator.setAttribute('aria-label', isSaving ? 'Auto-saving changes' : 'Changes saved');
+            };
+
+            if (saveIndicator) {
+                updateSaveState(true);
+                setTimeout(() => updateSaveState(false), 1500);
+                setInterval(() => {
+                    updateSaveState(true);
+                    setTimeout(() => updateSaveState(false), 1500);
+                }, 10000);
+            }
+
+            // Color swatch interactions
+            const colorSwatches = document.querySelectorAll('.color-swatch[tabindex="0"]');
+            colorSwatches.forEach(swatch => {
+                swatch.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        swatch.classList.add('highlight');
+                        setTimeout(() => swatch.classList.remove('highlight'), 700);
+                    }
+                });
+            });
+
+            // Export format buttons
+            const exportFormatButtons = document.querySelectorAll('.export-format-btn');
+            const setExportFormat = (activeButton) => {
+                const selectedFormat = activeButton && activeButton.dataset ? activeButton.dataset.format : '';
+                exportFormatButtons.forEach(button => {
+                    const isActive = button === activeButton;
+                    button.classList.toggle('is-active', isActive);
+                    button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                });
+                if (downloadBtn && selectedFormat) {
+                    downloadBtn.textContent = `Download ${selectedFormat}`;
+                    downloadBtn.setAttribute('aria-label', `Download selected visual as ${selectedFormat}`);
+                }
+            };
+
+            if (exportFormatButtons.length) {
+                setExportFormat(exportFormatButtons[0]);
+                exportFormatButtons.forEach(button => {
+                    button.addEventListener('click', () => setExportFormat(button));
+                    button.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            setExportFormat(button);
+                        }
+                    });
+                });
+            }
+        });
+    </script>
+</body>
+</html>

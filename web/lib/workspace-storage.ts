@@ -3,6 +3,7 @@ export type WorkspaceSelection = {
   y: number;
   width: number;
   height: number;
+  ratio?: 'square' | 'widescreen' | 'custom';
 };
 
 export type WorkspaceProject = {

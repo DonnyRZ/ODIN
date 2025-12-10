@@ -1,15 +1,16 @@
 'use client';
 
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
+import { WorkspaceSelectionOverlay } from './workspace-selection-overlay';
 
 export function WorkspaceSlidePreview() {
   const { project } = useWorkspaceProject();
   const hasSlide = Boolean(project.slideImage);
 
   return (
-    <div className="aspect-video w-full rounded-xl border border-gray-200 bg-gray-50">
+    <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
       {hasSlide ? (
-        <div className="relative h-full w-full overflow-hidden rounded-[inherit] bg-black/5">
+        <div className="relative h-full w-full bg-black/5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={project.slideImage}
@@ -17,6 +18,7 @@ export function WorkspaceSlidePreview() {
             className="h-full w-full object-contain"
             draggable={false}
           />
+          <WorkspaceSelectionOverlay />
         </div>
       ) : (
         <div className="flex h-full items-center justify-center text-sm text-gray-500">

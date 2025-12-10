@@ -1,51 +1,19 @@
 import { ControlPanel } from './components/control-panel';
+import { WorkspaceHeader } from './components/workspace-header';
+import { WorkspaceProjectProvider } from './hooks/use-workspace-project';
 
 export default function WorkspacePage() {
   return (
-    <div className="min-h-screen bg-white text-gray-900">
-      <div className="flex min-h-screen flex-col">
-        <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 px-8 py-4 backdrop-blur">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                className="rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-              >
-                Back
-              </button>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Untitled project</p>
-                <p className="text-xs text-gray-500">Autosave ready</p>
-              </div>
+    <WorkspaceProjectProvider>
+      <div className="h-screen bg-white text-gray-900">
+        <div className="flex h-screen flex-col overflow-hidden">
+          <WorkspaceHeader />
+          <div className="flex flex-1 overflow-hidden">
+            <div className="flex h-full w-[360px] min-h-0 flex-col overflow-y-auto border-r border-gray-200 bg-white">
+              <ControlPanel />
             </div>
-            <div className="flex items-center gap-3 text-sm">
-              <button
-                type="button"
-                className="rounded-full border border-gray-200 px-4 py-2 font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-              >
-                Share
-              </button>
-              <button
-                type="button"
-                className="rounded-full border border-gray-200 px-4 py-2 font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-              >
-                Download
-              </button>
-              <button
-                type="button"
-                className="rounded-full border border-gray-200 px-4 py-2 font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </header>
-        <div className="flex flex-1 overflow-hidden">
-          <div className="w-[360px] border-r border-gray-200 bg-white">
-            <ControlPanel />
-          </div>
-          <main className="flex-1 overflow-y-auto bg-white">
-            <section className="border-b border-gray-200 px-10 py-8">
+            <main className="flex-1 overflow-y-auto bg-white">
+              <section className="border-b border-gray-200 px-10 py-8">
               <div className="mx-auto max-w-4xl">
                 <header className="mb-4 flex items-center justify-between">
                   <div>
@@ -74,7 +42,7 @@ export default function WorkspacePage() {
                 </div>
               </div>
             </section>
-            <section className="px-10 py-8">
+              <section className="px-10 py-8">
               <div className="mx-auto max-w-4xl">
                 <header className="mb-6 flex items-center justify-between">
                   <div>
@@ -117,10 +85,11 @@ export default function WorkspacePage() {
                   ))}
                 </div>
               </div>
-            </section>
-          </main>
+              </section>
+            </main>
+          </div>
         </div>
       </div>
-    </div>
+    </WorkspaceProjectProvider>
   );
 }

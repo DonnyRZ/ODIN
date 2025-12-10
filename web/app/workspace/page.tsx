@@ -1,5 +1,6 @@
 import { ControlPanel } from './components/control-panel';
 import { WorkspaceHeader } from './components/workspace-header';
+import { WorkspaceSlidePreview } from './components/workspace-slide-preview';
 import { WorkspaceProjectProvider } from './hooks/use-workspace-project';
 
 export default function WorkspacePage() {
@@ -35,11 +36,7 @@ export default function WorkspacePage() {
                     </button>
                   </div>
                 </header>
-                <div className="aspect-video w-full rounded-xl border border-gray-200 bg-gray-50">
-                  <div className="flex h-full items-center justify-center text-sm text-gray-500">
-                    Slide preview placeholder
-                  </div>
-                </div>
+                <WorkspaceSlidePreview />
               </div>
             </section>
               <section className="px-10 py-8">

@@ -1,6 +1,7 @@
 import { ControlPanel } from './components/control-panel';
 import { WorkspaceHeader } from './components/workspace-header';
 import { WorkspaceSlidePreview } from './components/workspace-slide-preview';
+import { GeneratedResultsSection } from './components/generated-results-section';
 import { WorkspaceProjectProvider } from './hooks/use-workspace-project';
 
 export default function WorkspacePage() {
@@ -39,50 +40,7 @@ export default function WorkspacePage() {
                 <WorkspaceSlidePreview />
               </div>
             </section>
-              <section className="px-10 py-8">
-              <div className="mx-auto max-w-4xl">
-                <header className="mb-6 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Generated results</p>
-                    <p className="text-sm text-gray-500">Three flat/minimal options sized to your selection</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-600 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-                  >
-                    Refresh
-                  </button>
-                </header>
-                <div className="grid gap-6 md:grid-cols-3">
-                  {[1, 2, 3].map((card) => (
-                    <article
-                      key={card}
-                      className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.06)]"
-                    >
-                      <div className="aspect-square border-b border-gray-100 bg-gray-50">
-                        <div className="flex h-full items-center justify-center text-xs text-gray-500">
-                          Result {card}
-                        </div>
-                      </div>
-                      <div className="flex flex-1 flex-col gap-2 px-4 py-4">
-                        <button
-                          type="button"
-                          className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-                        >
-                          Copy
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-                        >
-                          Download PNG
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-              </section>
+              <GeneratedResultsSection />
             </main>
           </div>
         </div>

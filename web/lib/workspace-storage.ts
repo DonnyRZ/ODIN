@@ -6,6 +6,13 @@ export type WorkspaceSelection = {
   ratio?: 'square' | 'widescreen' | 'custom';
 };
 
+export type WorkspaceGenerationResult = {
+  id: string;
+  imageUrl: string;
+  description: string;
+  createdAt: string;
+};
+
 export type WorkspaceProject = {
   id: string;
   name: string;
@@ -15,6 +22,9 @@ export type WorkspaceProject = {
   slideImage?: string;
   prompt?: string;
   selection?: WorkspaceSelection;
+  results: WorkspaceGenerationResult[];
+  generationStatus: 'idle' | 'generating' | 'error';
+  generationError?: string | null;
 };
 
 const PROJECT_STORAGE_KEY = 'odin.workspace.project';
@@ -30,6 +40,9 @@ export const createDefaultWorkspaceProject = (): WorkspaceProject => {
     createdAt: now,
     updatedAt: now,
     autosaveStatus: 'ready',
+    results: [],
+    generationStatus: 'idle',
+    generationError: null,
   };
 };
 

@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import {
+  WorkspaceGenerationResult,
   WorkspaceProject,
   WorkspaceSelection,
   createDefaultWorkspaceProject,
@@ -22,6 +23,10 @@ type WorkspaceProjectContextValue = {
   isHydrated: boolean;
   updateProject: (updates: Partial<WorkspaceProject>) => void;
   updateSelection: (selection: WorkspaceSelection | undefined) => void;
+  updatePrompt: (prompt: string) => void;
+  setAutosaveStatus: (status: WorkspaceProject['autosaveStatus']) => void;
+  appendGenerationResults: (results: WorkspaceGenerationResult[]) => void;
+  setGenerationState: (state: WorkspaceProject['generationStatus'], error?: string | null) => void;
 };
 
 const WorkspaceProjectContext = createContext<WorkspaceProjectContextValue | undefined>(undefined);
@@ -59,14 +64,80 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
     });
   }, []);
 
+  const updatePrompt = useCallback((prompt: string) => {
+    setProject((prev) => {
+      const next = {
+        ...prev,
+        prompt,
+        updatedAt: new Date().toISOString(),
+      };
+      persistWorkspaceProject(next);
+      return next;
+    });
+  }, []);
+
+  const setAutosaveStatus = useCallback((status: WorkspaceProject['autosaveStatus']) => {
+    setProject((prev) => {
+      const next = {
+        ...prev,
+        autosaveStatus: status,
+      };
+      return next;
+    });
+  }, []);
+
+  const appendGenerationResults = useCallback((results: WorkspaceGenerationResult[]) => {
+    setProject((prev) => {
+      const nextResults = [...(prev.results ?? []), ...results].slice(-12);
+      const next = {
+        ...prev,
+        results: nextResults,
+        generationStatus: 'idle',
+        generationError: null,
+        updatedAt: new Date().toISOString(),
+      };
+      persistWorkspaceProject(next);
+      return next;
+    });
+  }, []);
+
+  const setGenerationState = useCallback(
+    (state: WorkspaceProject['generationStatus'], error: string | null = null) => {
+      setProject((prev) => {
+        const next = {
+          ...prev,
+          generationStatus: state,
+          generationError: error,
+          updatedAt: new Date().toISOString(),
+        };
+        persistWorkspaceProject(next);
+        return next;
+      });
+    },
+    [],
+  );
+
   const value = useMemo(
     () => ({
       project,
       isHydrated,
       updateProject,
       updateSelection,
+      updatePrompt,
+      setAutosaveStatus,
+      appendGenerationResults,
+      setGenerationState,
     }),
-    [project, isHydrated, updateProject, updateSelection],
+    [
+      project,
+      isHydrated,
+      updateProject,
+      updateSelection,
+      updatePrompt,
+      setAutosaveStatus,
+      appendGenerationResults,
+      setGenerationState,
+    ],
   );
 
   return <WorkspaceProjectContext.Provider value={value}>{children}</WorkspaceProjectContext.Provider>;

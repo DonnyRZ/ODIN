@@ -20,7 +20,7 @@ export default function WorkspacePage() {
                 <header className="mb-4 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Slide preview</p>
-                    <p className="text-sm text-gray-500">16:9 canvas with selection overlay</p>
+                    <p className="text-sm text-gray-500">16:9 canvas preview of your uploaded slide</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button

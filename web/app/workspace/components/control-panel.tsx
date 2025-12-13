@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
-import { DrawToolsSection } from './draw-tools-section';
 import { GenerationSettingsSection } from './generation-settings-section';
 import { ProjectInfoSection } from './project-info-section';
 import { PromptInputSection } from './prompt-input-section';
@@ -77,7 +76,6 @@ export function ControlPanel() {
         onSelectFile={handleSlideUpload}
         onClearSlide={handleSlideClear}
       />
-      <DrawToolsSection />
       <PromptInputSection />
       <GenerationSettingsSection />
       <TipsSection />

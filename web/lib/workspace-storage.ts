@@ -1,16 +1,9 @@
-export type WorkspaceSelection = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  ratio?: 'square' | 'widescreen' | 'custom';
-};
-
 export type WorkspaceGenerationResult = {
   id: string;
   imageUrl: string;
   description: string;
   createdAt: string;
+  source?: 'mock' | 'api';
 };
 
 export type WorkspaceProject = {
@@ -21,7 +14,6 @@ export type WorkspaceProject = {
   autosaveStatus: 'ready' | 'saving';
   slideImage?: string;
   prompt?: string;
-  selection?: WorkspaceSelection;
   results: WorkspaceGenerationResult[];
   generationStatus: 'idle' | 'generating' | 'error';
   generationError?: string | null;

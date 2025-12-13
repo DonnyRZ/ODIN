@@ -12,7 +12,6 @@ import {
 import {
   WorkspaceGenerationResult,
   WorkspaceProject,
-  WorkspaceSelection,
   createDefaultWorkspaceProject,
   loadWorkspaceProject,
   persistWorkspaceProject,
@@ -22,7 +21,6 @@ type WorkspaceProjectContextValue = {
   project: WorkspaceProject;
   isHydrated: boolean;
   updateProject: (updates: Partial<WorkspaceProject>) => void;
-  updateSelection: (selection: WorkspaceSelection | undefined) => void;
   updatePrompt: (prompt: string) => void;
   setAutosaveStatus: (status: WorkspaceProject['autosaveStatus']) => void;
   appendGenerationResults: (results: WorkspaceGenerationResult[]) => void;
@@ -36,7 +34,14 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
   const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
-    setProject(loadWorkspaceProject());
+    const loaded = loadWorkspaceProject();
+    const resetState: WorkspaceProject = {
+      ...loaded,
+      generationStatus: 'idle',
+      generationError: null,
+    };
+    setProject(resetState);
+    persistWorkspaceProject(resetState);
     setIsHydrated(true);
   }, []);
 
@@ -45,18 +50,6 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
       const next = {
         ...prev,
         ...updates,
-        updatedAt: new Date().toISOString(),
-      };
-      persistWorkspaceProject(next);
-      return next;
-    });
-  }, []);
-
-  const updateSelection = useCallback((selection: WorkspaceSelection | undefined) => {
-    setProject((prev) => {
-      const next = {
-        ...prev,
-        selection,
         updatedAt: new Date().toISOString(),
       };
       persistWorkspaceProject(next);
@@ -122,7 +115,6 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
       project,
       isHydrated,
       updateProject,
-      updateSelection,
       updatePrompt,
       setAutosaveStatus,
       appendGenerationResults,
@@ -132,7 +124,6 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
       project,
       isHydrated,
       updateProject,
-      updateSelection,
       updatePrompt,
       setAutosaveStatus,
       appendGenerationResults,

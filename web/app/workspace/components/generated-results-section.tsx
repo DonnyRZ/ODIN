@@ -2,6 +2,25 @@
 
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
 
+const downloadImage = (dataUrl: string, filename: string) => {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+const copyImage = async (dataUrl: string) => {
+  if (!navigator.clipboard || !window.ClipboardItem) {
+    await navigator.clipboard.writeText(dataUrl);
+    return;
+  }
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+};
+
 export function GeneratedResultsSection() {
   const { project } = useWorkspaceProject();
   const isGenerating = project.generationStatus === 'generating';
@@ -15,7 +34,7 @@ export function GeneratedResultsSection() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Generated results</p>
             <p className="text-sm text-gray-500">
-              {isGenerating ? 'Generating mock visuals...' : 'Three flat/minimal options sized to your selection'}
+              {isGenerating ? 'Generating visuals...' : 'Three flat/minimal options tailored to your chosen ratio'}
             </p>
           </div>
           <button
@@ -51,13 +70,15 @@ export function GeneratedResultsSection() {
                   </div>
                   <div className="flex flex-1 flex-col gap-2 px-4 py-4">
                     <button
-                      type="button"
+                     type="button"
+                      onClick={() => copyImage(result.imageUrl)}
                       className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
                     >
                       Copy
                     </button>
                     <button
                       type="button"
+                      onClick={() => downloadImage(result.imageUrl, `odin-visual-${result.id}.png`)}
                       className="rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
                     >
                       Download PNG
@@ -68,7 +89,7 @@ export function GeneratedResultsSection() {
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-gray-200 px-6 py-12 text-center text-sm text-gray-500">
-            {isGenerating ? 'Generating mock visuals...' : 'Click Generate to see visuals appear here.'}
+            {isGenerating ? 'Generating visuals...' : 'Click Generate to see visuals appear here.'}
           </div>
         )}
       </div>

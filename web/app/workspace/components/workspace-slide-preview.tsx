@@ -1,7 +1,6 @@
 'use client';
 
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
-import { WorkspaceSelectionOverlay } from './workspace-selection-overlay';
 
 export function WorkspaceSlidePreview() {
   const { project } = useWorkspaceProject();
@@ -18,7 +17,6 @@ export function WorkspaceSlidePreview() {
             className="h-full w-full object-contain"
             draggable={false}
           />
-          <WorkspaceSelectionOverlay />
         </div>
       ) : (
         <div className="flex h-full items-center justify-center text-sm text-gray-500">

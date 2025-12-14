@@ -17,6 +17,16 @@ ASPECT_RATIO_MAP = {
   "landscape_16x9": ("landscape", "a widescreen slide illustration"),
 }
 
+PROMPT_INSTRUCTIONS = """
+You are enhancing a prompt for a presentation-ready visual.
+- The user prompt is the SOURCE OF TRUTH for the subject/action. Do not change the subject.
+- Analyze the provided slide image to infer palette, mood, props, and layout cues, but never recreate or describe the slide content.
+- Use the slide context only to suggest styling cues that support the user prompt.
+- Best practices: be hyper-specific, keep tone positive, describe foreground/midground/background, suggest camera direction, keep a modern product-deck feel, and ensure only the background is pure white.
+
+Output a single cohesive sentence that begins with "Subject (source of truth): ..." followed by "Style:" with slide-inspired cues. Never mention text from the slide.
+"""
+
 
 def _decode_image_data(data_url: str) -> tuple[str, bytes]:
   if not data_url:
@@ -50,21 +60,11 @@ class GenAIClient:
     slide_image_base64: str,
   ) -> str:
     if creativity <= 0:
-      return user_prompt
+      return f"Subject (source of truth): {user_prompt}"
     if creativity >= 1:
       creativity_weight = 1.0
     else:
       creativity_weight = creativity
-
-    instructions = """
-You are rewriting a prompt for a presentation-quality visual. Apply these best practices:
-- Be hyper-specific about subjects, colors, lighting, and layout so the designer has full control.
-- Keep the tone positive; describe what should exist instead of what to avoid.
-- Provide step-by-step composition guidance (foreground, midground, background).
-- Suggest camera direction or viewpoint that fits the visual.
-- Maintain a cohesive, modern product-deck style.
-- Ensure only the background is white; all other elements use rich colors.
-"""
 
     mime_type, image_bytes = _decode_image_data(slide_image_base64)
 
@@ -72,7 +72,7 @@ You are rewriting a prompt for a presentation-quality visual. Apply these best p
 
     image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
     text_part = types.Part.from_text(
-      f"""{instructions.strip()}
+      f"""{PROMPT_INSTRUCTIONS.strip()}
 
 Slide visual provided above.
 Slide context text:
@@ -91,12 +91,15 @@ Rewrite the prompt, embedding those principles."""
       ],
       config=types.GenerateContentConfig(),
     )
-    ai_prompt = response.text.strip() if response.text else user_prompt
+    ai_prompt = (response.text or "").strip()
 
-    if creativity_weight >= 0.99:
-      return ai_prompt
+    if creativity_weight <= 0:
+      return f"Subject (source of truth): {user_prompt}"
 
-    return f"{user_prompt}\n\n[AI suggestion]\n{ai_prompt}"
+    if not ai_prompt:
+      return f"Subject (source of truth): {user_prompt}"
+
+    return f"Subject (source of truth): {user_prompt}\n\n{ai_prompt}"
 
   def generate_images(self, prompt: str, aspect_ratio: str, count: int) -> List[bytes]:
     _, ratio_label = ASPECT_RATIO_MAP.get(aspect_ratio, ("square", "a square icon"))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import List
 
 from google import genai
@@ -17,6 +18,23 @@ ASPECT_RATIO_MAP = {
 }
 
 
+def _decode_image_data(data_url: str) -> tuple[str, bytes]:
+  if not data_url:
+    raise ValueError("Slide image missing.")
+
+  if data_url.startswith("data:"):
+    header, b64data = data_url.split(",", 1)
+    mime = header.split(";")[0].replace("data:", "") or "image/png"
+  else:
+    mime = "image/png"
+    b64data = data_url
+
+  try:
+    return mime, base64.b64decode(b64data)
+  except Exception as exc:  # pragma: no cover
+    raise ValueError("Invalid slide image data.") from exc
+
+
 class GenAIClient:
   def __init__(self):
     self.prompt_client = genai.Client(api_key=settings.genai_api_key)
@@ -24,7 +42,13 @@ class GenAIClient:
     self.prompt_model = settings.genai_model
     self.image_model = settings.image_model
 
-  def enhance_prompt(self, user_prompt: str, slide_context: str, creativity: float) -> str:
+  def enhance_prompt(
+    self,
+    user_prompt: str,
+    slide_context: str,
+    creativity: float,
+    slide_image_base64: str,
+  ) -> str:
     if creativity <= 0:
       return user_prompt
     if creativity >= 1:
@@ -32,18 +56,40 @@ class GenAIClient:
     else:
       creativity_weight = creativity
 
+    instructions = """
+You are rewriting a prompt for a presentation-quality visual. Apply these best practices:
+- Be hyper-specific about subjects, colors, lighting, and layout so the designer has full control.
+- Keep the tone positive; describe what should exist instead of what to avoid.
+- Provide step-by-step composition guidance (foreground, midground, background).
+- Suggest camera direction or viewpoint that fits the visual.
+- Maintain a cohesive, modern product-deck style.
+- Ensure only the background is white; all other elements use rich colors.
+"""
+
+    mime_type, image_bytes = _decode_image_data(slide_image_base64)
+
+    context_text = slide_context or "No additional slide copy provided."
+
+    image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+    text_part = types.Part.from_text(
+      f"""{instructions.strip()}
+
+Slide visual provided above.
+Slide context text:
+{context_text}
+
+User prompt:
+{user_prompt}
+
+Rewrite the prompt, embedding those principles."""
+    )
+
     response = self.prompt_client.models.generate_content(
       model=self.prompt_model,
       contents=[
-        {
-          "role": "user",
-          "parts": [
-            {
-              "text": f"""Slide context:\n{slide_context}\n\nUser prompt:\n{user_prompt}\n\nRewrite the prompt to keep it on-context but more imaginative. Use short sentences."""
-            }
-          ],
-        }
+        types.Content(role="user", parts=[image_part, text_part]),
       ],
+      config=types.GenerateContentConfig(),
     )
     ai_prompt = response.text.strip() if response.text else user_prompt
 
@@ -55,18 +101,7 @@ class GenAIClient:
   def generate_images(self, prompt: str, aspect_ratio: str, count: int) -> List[bytes]:
     _, ratio_label = ASPECT_RATIO_MAP.get(aspect_ratio, ("square", "a square icon"))
     prompt_template = f"""
-Goal: craft a presentation-ready, flat/minimal vector-style visual that fits {ratio_label}.
-Hard rule: the background must be solid white, but every shape, line, or typographic element must use saturated, non-white colors.
-Context and intent:
-{prompt}
-
-Best-practice instructions:
-1. Be hyper-specific about objects, colors, lighting, and layout so the slide designer has full control.
-2. Keep the tone positive; describe what should exist instead of what to avoid.
-3. Provide step-by-step composition guidance (foreground, midground, background).
-4. Suggest camera direction (e.g., isometric, low-angle, macro) that suits {ratio_label}.
-5. Ensure the artwork feels cohesive with modern product pitch decks and uses a solid white background.
-6. Use bold, non-white colors for all shapes, lines, and typography; only the background may be pure white.
+Create a presentation-ready, flat/minimal vector visual for {ratio_label}. Ensure only the background is pure white while all shapes/typography use rich colors. Context: {prompt}
 """
 
     results = []

@@ -42,7 +42,7 @@ export function GenerationSettingsSection() {
           slide_context: project.prompt ?? '',
           slide_image_base64: project.slideImage,
           variant_count: 3,
-          creativity: 0.5,
+          creativity: 0.7,
           aspect_ratio: aspectRatio,
         }),
       });

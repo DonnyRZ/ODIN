@@ -48,11 +48,19 @@ async def generate_visuals(payload: GenerateRequest) -> GenerateResponse:
   if not payload.prompt and not payload.slide_context:
     raise HTTPException(status_code=400, detail="Prompt or slide context required.")
 
-  final_prompt = genai_client.enhance_prompt(
-    user_prompt=payload.prompt or "",
-    slide_context=payload.slide_context or "",
-    creativity=payload.creativity,
-  )
+  if not payload.slide_image_base64:
+    raise HTTPException(status_code=400, detail="Slide image is required.")
+
+  try:
+    final_prompt = genai_client.enhance_prompt(
+      user_prompt=payload.prompt or "",
+      slide_context=payload.slide_context or "",
+      creativity=payload.creativity,
+      slide_image_base64=payload.slide_image_base64,
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  logger.info("Original prompt: %s", payload.prompt)
   logger.info("Enhanced prompt: %s", final_prompt)
 
   try:

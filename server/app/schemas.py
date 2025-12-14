@@ -10,7 +10,7 @@ class GenerateRequest(BaseModel):
   slide_context: Optional[str] = Field(None, description="Extracted text or notes from the slide")
   slide_image_base64: Optional[str] = Field(None, description="Full slide screenshot encoded as base64 data URL")
   variant_count: int = Field(default=3, ge=1, le=6)
-  creativity: float = Field(0.5, ge=0.0, le=1.0)
+  creativity: float = Field(0.7, ge=0.0, le=1.0)
   aspect_ratio: str = Field("square", pattern="^(square|portrait_9x16|landscape_16x9)$")
 
 

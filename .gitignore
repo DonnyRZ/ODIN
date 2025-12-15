@@ -66,9 +66,9 @@ tmp/
 temp/
 
 # Project files to ignore (current workspace snapshot)
-# DESIGN_RULES.md
+DESIGN_RULES.md
 # ODIN.md
-# TECH_STACK.md
+TECH_STACK.md
 
 # Next.js build artifacts
 web/.next/

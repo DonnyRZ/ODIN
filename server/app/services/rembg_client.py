@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from io import BytesIO
+from time import perf_counter
 from typing import Tuple
 
 import cv2
@@ -10,10 +12,14 @@ from PIL import Image
 from rembg import new_session, remove
 
 
-MAX_PROCESS_SIDE = 1400
+MAX_PROCESS_SIDE = 1100
 BACKGROUND_TINT = (160, 160, 160)
 FLOOD_TOLERANCE = 12
 MORPH_KERNEL_SIZE = (7, 7)
+COVERAGE_THRESHOLD = 0.92
+BACKGROUND_BRIGHTNESS_TRIGGER = 200
+
+logger = logging.getLogger("odin")
 
 
 @lru_cache(maxsize=1)
@@ -32,12 +38,14 @@ def _bgr_to_pil(bgr: np.ndarray) -> Image.Image:
 
 
 def _isnet_mask(image: Image.Image) -> np.ndarray:
+  start = perf_counter()
   mask = remove(
     image,
     session=_get_isnet_session(),
     only_mask=True,
     post_process_mask=True,
   )
+  logger.info("IS-Net inference took %.2fs for %sx%s", perf_counter() - start, image.width, image.height)
   return np.array(mask.convert("L"), dtype=np.uint8)
 
 
@@ -64,6 +72,23 @@ def _tint_background(bgr: np.ndarray, bg_mask: np.ndarray, tint: Tuple[int, int,
   tinted = bgr.copy()
   tinted[bg_mask > 0] = np.array(tint, dtype=np.uint8)
   return tinted
+
+
+def _should_run_tinted_pass(mask_u8: np.ndarray, bgr: np.ndarray, bg_mask: np.ndarray) -> bool:
+  if not np.any(bg_mask):
+    return False
+
+  coverage = float(mask_u8.mean()) / 255.0
+  if coverage >= COVERAGE_THRESHOLD:
+    return False
+
+  gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+  bg_pixels = gray[bg_mask > 0]
+  if bg_pixels.size == 0:
+    return False
+
+  background_brightness = float(bg_pixels.mean())
+  return background_brightness >= BACKGROUND_BRIGHTNESS_TRIGGER
 
 
 def _fill_holes(binary: np.ndarray) -> np.ndarray:
@@ -103,17 +128,37 @@ def _image_to_png_bytes(image: Image.Image) -> bytes:
 
 
 def remove_background(image_bytes: bytes) -> bytes:
+  total_start = perf_counter()
   base_image = Image.open(BytesIO(image_bytes)).convert("RGBA")
   processed = _resize_if_needed(base_image, MAX_PROCESS_SIDE)
+  if processed.size != base_image.size:
+    logger.info(
+      "Downscaled slide from %sx%s to %sx%s",
+      base_image.width,
+      base_image.height,
+      processed.width,
+      processed.height,
+    )
 
   bgr = _pil_to_bgr(processed)
   bg_mask = _floodfill_background_mask(bgr, FLOOD_TOLERANCE)
-  tinted = _tint_background(bgr, bg_mask, BACKGROUND_TINT)
 
   mask_original = _isnet_mask(processed)
-  mask_tinted = _isnet_mask(_bgr_to_pil(tinted))
-  combined_mask = np.maximum(mask_original, mask_tinted)
+  combined_mask = mask_original
+
+  tinted_needed = _should_run_tinted_pass(mask_original, bgr, bg_mask)
+  logger.info("Tinted pass required: %s", tinted_needed)
+
+  if tinted_needed:
+    tint_start = perf_counter()
+    tinted = _tint_background(bgr, bg_mask, BACKGROUND_TINT)
+    mask_tinted = _isnet_mask(_bgr_to_pil(tinted))
+    combined_mask = np.maximum(mask_original, mask_tinted)
+    logger.info("Tinted pass union took %.2fs", perf_counter() - tint_start)
+
+  refine_start = perf_counter()
   refined_alpha = _improve_mask(combined_mask)
+  logger.info("Mask refinement took %.2fs", perf_counter() - refine_start)
 
   rgba = np.array(processed, dtype=np.uint8)
   rgba[:, :, 3] = refined_alpha
@@ -121,4 +166,6 @@ def remove_background(image_bytes: bytes) -> bytes:
     rgba = cv2.resize(rgba, base_image.size, interpolation=cv2.INTER_LINEAR)
 
   final_image = Image.fromarray(rgba, "RGBA")
-  return _image_to_png_bytes(final_image)
+  output = _image_to_png_bytes(final_image)
+  logger.info("Background removal total %.2fs", perf_counter() - total_start)
+  return output

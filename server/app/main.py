@@ -3,6 +3,7 @@ import base64
 from uuid import uuid4
 
 import logging
+from time import perf_counter
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,7 @@ app = FastAPI(
 )
 
 logger = logging.getLogger("odin")
+logger.setLevel(logging.INFO)
 
 app.add_middleware(
   CORSMiddleware,
@@ -52,29 +54,39 @@ async def generate_visuals(payload: GenerateRequest) -> GenerateResponse:
     raise HTTPException(status_code=400, detail="Slide image is required.")
 
   try:
+    prompt_start = perf_counter()
     final_prompt = genai_client.enhance_prompt(
       user_prompt=payload.prompt or "",
       slide_context=payload.slide_context or "",
       creativity=payload.creativity,
       slide_image_base64=payload.slide_image_base64,
     )
+    logger.info("Prompt enhancement took %.2fs", perf_counter() - prompt_start)
   except ValueError as exc:
     raise HTTPException(status_code=400, detail=str(exc)) from exc
   logger.info("Original prompt: %s", payload.prompt)
   logger.info("Enhanced prompt: %s", final_prompt)
 
   try:
+    image_start = perf_counter()
     semi_images = genai_client.generate_images(
       prompt=final_prompt,
       aspect_ratio=payload.aspect_ratio,
       count=payload.variant_count,
     )
+    logger.info(
+      "Image generation took %.2fs for %s variants",
+      perf_counter() - image_start,
+      payload.variant_count,
+    )
   except Exception as exc:
     raise HTTPException(status_code=502, detail=str(exc)) from exc
 
   results = []
-  for raw_image in semi_images:
+  for idx, raw_image in enumerate(semi_images, start=1):
+    rembg_start = perf_counter()
     transparent = remove_background(raw_image)
+    logger.info("Background removal for image %s took %.2fs", idx, perf_counter() - rembg_start)
     encoded = base64.b64encode(transparent).decode("ascii")
     results.append(
       GeneratedResult(

@@ -12,9 +12,9 @@ from app.core.config import get_settings
 settings = get_settings()
 
 ASPECT_RATIO_MAP = {
-  "square": ("square", "a square icon or badge"),
+  "square": ("square", "a square visual panel"),
   "portrait_9x16": ("portrait", "a tall story-style panel"),
-  "landscape_16x9": ("landscape", "a widescreen slide illustration"),
+  "landscape_16x9": ("landscape", "a widescreen visual panel"),
 }
 
 PROMPT_INSTRUCTIONS = """
@@ -102,9 +102,9 @@ Rewrite the prompt, embedding those principles."""
     return f"Subject (source of truth): {user_prompt}\n\n{ai_prompt}"
 
   def generate_images(self, prompt: str, aspect_ratio: str, count: int) -> List[bytes]:
-    _, ratio_label = ASPECT_RATIO_MAP.get(aspect_ratio, ("square", "a square icon"))
+    _, ratio_label = ASPECT_RATIO_MAP.get(aspect_ratio, ("square", "a square visual panel"))
     prompt_template = f"""
-Create a presentation-ready, flat/minimal vector visual for {ratio_label}. Ensure only the background is pure white while all shapes/typography use rich colors. Context: {prompt}
+Create a presentation-ready, flat/minimal vector visual for {ratio_label}. Render the subject with a bold, continuous outline that traces the entire silhouette so it stands apart from the background. Keep the subject's materials and colors faithful to the prompt and real-world expectations (skin tones, fur, foliage, metals, etc.)—never recolor the subject just to add contrast. Instead, use a single contrasting background color (or smooth gradient) that differs from those authentic subject hues. Ensure all shapes/typography use rich colors. Context: {prompt}
 """
 
     results = []
@@ -124,7 +124,9 @@ Create a presentation-ready, flat/minimal vector visual for {ratio_label}. Ensur
         config=types.GenerateContentConfig(
           systemInstruction="""
 You are a presentation visual designer. Enforce strictly:
-  - The only white element allowed is the background (#FFFFFF).
+  - Outline the entire subject with a clean, visible stroke so edges are unambiguous.
+  - Preserve subject colors exactly as described (skin, fur, materials stay natural); never recolor the subject for contrast.
+  - Use a single background color or gradient that contrasts with the subject while remaining plain.
   - All icons, shapes, typography, and decorative strokes must use distinct, non-white colors.
 """.strip(),
           response_modalities=["IMAGE"],

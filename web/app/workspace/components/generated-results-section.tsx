@@ -34,7 +34,9 @@ export function GeneratedResultsSection() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Generated results</p>
             <p className="text-sm text-gray-500">
-              {isGenerating ? 'Generating visuals...' : 'Three flat/minimal options tailored to your chosen ratio'}
+              {isGenerating
+                ? 'Generating visuals sequentially...'
+                : 'New flat/minimal options appear here as soon as they are ready.'}
             </p>
           </div>
           <button

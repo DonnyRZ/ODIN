@@ -22,7 +22,10 @@ You are enhancing a prompt for a presentation-ready visual.
 - The user prompt is the SOURCE OF TRUTH for the subject/action. Do not change the subject.
 - Analyze the provided slide image to infer palette, mood, props, and layout cues, but never recreate or describe the slide content.
 - Use the slide context only to suggest styling cues that support the user prompt.
-- Best practices: be hyper-specific, keep tone positive, describe foreground/midground/background, suggest camera direction, keep a modern product-deck feel, and ensure only the background is pure white.
+- The visual must depict only the subject; avoid adding background props, desks, environment scenes, or UI chrome unless the user explicitly asks for them.
+- Background should be a single contrasting color or gentle gradient that stays plain (no patterns, scenery, or photographic detail).
+- Unless the user requests it, do not include any text, lettering, or typographic elements in the visual.
+- Best practices: be hyper-specific, keep tone positive, describe foreground/midground/background separation, suggest camera direction, and emphasize that the subject stands on a plain contrasting background.
 
 Output a single cohesive sentence that begins with "Subject (source of truth): ..." followed by "Style:" with slide-inspired cues. Never mention text from the slide.
 """
@@ -104,7 +107,7 @@ Rewrite the prompt, embedding those principles."""
   def generate_images(self, prompt: str, aspect_ratio: str, count: int) -> List[bytes]:
     _, ratio_label = ASPECT_RATIO_MAP.get(aspect_ratio, ("square", "a square visual panel"))
     prompt_template = f"""
-Create a presentation-ready, flat/minimal vector visual for {ratio_label}. Render the subject with a bold, continuous outline that traces the entire silhouette so it stands apart from the background. Keep the subject's materials and colors faithful to the prompt and real-world expectations (skin tones, fur, foliage, metals, etc.)—never recolor the subject just to add contrast. Instead, use a single contrasting background color (or smooth gradient) that differs from those authentic subject hues. Ensure all shapes/typography use rich colors. Context: {prompt}
+Create a presentation-ready, flat/minimal vector visual for {ratio_label}. Render only the subject with a bold, continuous outline that traces the entire silhouette so it stands apart from the background. Keep the subject's materials and colors faithful to the prompt and real-world expectations (skin tones, fur, foliage, metals, etc.)—never recolor the subject just to add contrast. Use a single contrasting background color (or smooth gradient) that remains plain (no desks, monitors, props, scenery, or patterns). Unless the user explicitly requests it, do not include any text, lettering, dashboards, or UI chrome anywhere in the composition. Ensure all shapes/typography use rich colors. Context: {prompt}
 """
 
     results = []
@@ -124,9 +127,11 @@ Create a presentation-ready, flat/minimal vector visual for {ratio_label}. Rende
         config=types.GenerateContentConfig(
           systemInstruction="""
 You are a presentation visual designer. Enforce strictly:
+  - Render only the subject; remove desks, devices, furniture, scenery, or UI chrome unless specifically requested.
   - Outline the entire subject with a clean, visible stroke so edges are unambiguous.
   - Preserve subject colors exactly as described (skin, fur, materials stay natural); never recolor the subject for contrast.
-  - Use a single background color or gradient that contrasts with the subject while remaining plain.
+  - Use a single, plain background color or gradient that contrasts with the subject while remaining empty.
+  - Do not include text, lettering, dashboards, or other typographic/UI elements unless the user explicitly asks for them.
   - All icons, shapes, typography, and decorative strokes must use distinct, non-white colors.
 """.strip(),
           response_modalities=["IMAGE"],

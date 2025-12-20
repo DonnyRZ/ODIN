@@ -17,6 +17,7 @@ export type WorkspaceProject = {
   results: WorkspaceGenerationResult[];
   generationStatus: 'idle' | 'generating' | 'error';
   generationError?: string | null;
+  pendingSlots: number;
 };
 
 const PROJECT_STORAGE_KEY = 'odin.workspace.project';
@@ -35,6 +36,7 @@ export const createDefaultWorkspaceProject = (): WorkspaceProject => {
     results: [],
     generationStatus: 'idle',
     generationError: null,
+    pendingSlots: 0,
   };
 };
 
@@ -53,6 +55,7 @@ export const loadWorkspaceProject = (): WorkspaceProject => {
     return {
       ...createDefaultWorkspaceProject(),
       ...parsed,
+      pendingSlots: parsed.pendingSlots ?? 0,
     };
   } catch {
     return createDefaultWorkspaceProject();

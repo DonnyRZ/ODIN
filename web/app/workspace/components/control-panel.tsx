@@ -6,7 +6,6 @@ import { GenerationSettingsSection } from './generation-settings-section';
 import { ProjectInfoSection } from './project-info-section';
 import { PromptInputSection } from './prompt-input-section';
 import { SlideUploadSection } from './slide-upload-section';
-import { TipsSection } from './tips-section';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
 
@@ -78,7 +77,6 @@ export function ControlPanel() {
       />
       <PromptInputSection />
       <GenerationSettingsSection />
-      <TipsSection />
     </aside>
   );
 }

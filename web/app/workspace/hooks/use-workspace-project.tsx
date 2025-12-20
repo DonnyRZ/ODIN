@@ -25,6 +25,7 @@ type WorkspaceProjectContextValue = {
   setAutosaveStatus: (status: WorkspaceProject['autosaveStatus']) => void;
   appendGenerationResults: (results: WorkspaceGenerationResult[]) => void;
   setGenerationState: (state: WorkspaceProject['generationStatus'], error?: string | null) => void;
+  setPendingSlots: (count: number) => void;
 };
 
 const WorkspaceProjectContext = createContext<WorkspaceProjectContextValue | undefined>(undefined);
@@ -85,9 +86,9 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
       const next = {
         ...prev,
         results: nextResults,
-        generationStatus: 'idle',
         generationError: null,
         updatedAt: new Date().toISOString(),
+        pendingSlots: Math.max(prev.pendingSlots - results.length, 0),
       };
       persistWorkspaceProject(next);
       return next;
@@ -110,6 +111,17 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
     [],
   );
 
+  const setPendingSlots = useCallback((count: number) => {
+    setProject((prev) => {
+      const next = {
+        ...prev,
+        pendingSlots: count,
+      };
+      persistWorkspaceProject(next);
+      return next;
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       project,
@@ -119,6 +131,7 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
       setAutosaveStatus,
       appendGenerationResults,
       setGenerationState,
+      setPendingSlots,
     }),
     [
       project,
@@ -128,6 +141,7 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
       setAutosaveStatus,
       appendGenerationResults,
       setGenerationState,
+      setPendingSlots,
     ],
   );
 

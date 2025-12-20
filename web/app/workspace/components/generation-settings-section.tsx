@@ -28,7 +28,7 @@ const parseSseEvent = (chunk: string): SseEvent => {
 };
 
 export function GenerationSettingsSection() {
-  const { project, appendGenerationResults, setGenerationState } = useWorkspaceProject();
+  const { project, appendGenerationResults, setGenerationState, setPendingSlots } = useWorkspaceProject();
   const [formError, setFormError] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<'square' | 'portrait_9x16' | 'landscape_16x9'>('square');
   const [variantCount, setVariantCount] = useState(3);
@@ -43,6 +43,7 @@ export function GenerationSettingsSection() {
 
     setFormError(null);
     setGenerationState('generating');
+    setPendingSlots(variantCount);
 
     try {
       const response = await fetch(`${API_BASE_URL}/generate`, {
@@ -110,16 +111,19 @@ export function GenerationSettingsSection() {
             return;
           } else if (parsed.event === 'done') {
             setGenerationState('idle');
+            setPendingSlots(0);
             reader.cancel();
             return;
           }
         }
       }
       setGenerationState('idle');
+      setPendingSlots(0);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       setGenerationState('error', message);
       setFormError(`Unable to generate visuals: ${message}`);
+      setPendingSlots(0);
     }
   };
 
@@ -160,14 +164,6 @@ export function GenerationSettingsSection() {
               </option>
             ))}
           </select>
-        </label>
-        <label className="flex items-center gap-3 text-sm text-gray-600">
-          <input
-            type="checkbox"
-            defaultChecked
-            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-          />
-          Lock to detected colors
         </label>
         <button
           type="button"

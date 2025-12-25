@@ -22,6 +22,8 @@ class Settings(BaseSettings):
   image_model: str = Field("gemini-3-pro-image-preview", env="IMAGE_GEN")
   creativity_default: float = Field(0.5, ge=0.0, le=1.0)
   max_variants: int = Field(3, ge=1, le=6)
+  google_client_id: str = Field("", env="GOOGLE_CLIENT_ID")
+  google_client_secret: str = Field("", env="GOOGLE_CLIENT_SECRET")
 
 
 @lru_cache(maxsize=1)

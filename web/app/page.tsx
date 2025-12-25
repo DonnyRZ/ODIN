@@ -1,38 +1,121 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import {
+  clearAuthToken,
+  getAuthToken,
+  getOwnerId,
+  setActiveProjectId,
+  setAuthToken,
+} from '@/lib/workspace-storage';
+import { useRouter } from 'next/navigation';
 
-const projects = [
-  {
-    id: 'pitch-q1',
-    name: 'Pitch Deck – Q1 2025',
-    visuals: 12,
-    updated: '3 hours ago',
-    status: 'In progress'
-  },
-  {
-    id: 'sales-europe',
-    name: 'Sales Narrative – Europe',
-    visuals: 8,
-    updated: 'Yesterday',
-    status: 'Completed'
-  },
-  {
-    id: 'ops-weekly',
-    name: 'Ops Weekly – April 2',
-    visuals: 5,
-    updated: '2 days ago',
-    status: 'In progress'
-  }
-];
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
+
+type ProjectSummary = {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  generation_count: number;
+};
+
 
 const steps: Array<[string, string]> = [
-  ['Drop a slide', 'Upload a PNG/JPG of the slide you’re editing—ODIN ingests it instantly.'],
-  ['Draw the empty area', 'Highlight the space you want to fill. ODIN snaps to square or 16:9 automatically.'],
+  ['Drop a slide', "Upload a PNG/JPG of the slide you're editing - ODIN ingests it instantly."],
+  ['Choose the aspect ratio', 'Pick square, 9:16, or 16:9 so ODIN matches your slide layout.'],
   ['Describe the slide', 'Paste the title/body copy so ODIN captures the intent and language.'],
   ['Paste the result', 'Pick your favorite visual, copy to clipboard, and drop it straight into your deck.']
 ];
 
 export default function HomePage() {
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [authToken, setAuthTokenState] = useState<string | null>(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const router = useRouter();
+
+  useEffect(() => {
+    setAuthTokenState(getAuthToken());
+    const loadProjects = async () => {
+      try {
+        const ownerId = getOwnerId();
+        const response = await fetch(`${API_BASE_URL}/projects?owner_id=${ownerId}`, {
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+        });
+        if (!response.ok) {
+          return;
+        }
+        const payload = (await response.json()) as { projects: ProjectSummary[] };
+        setProjects(payload.projects.slice(0, 6));
+      } catch {
+        // Ignore failures and keep the empty state.
+      }
+    };
+
+    loadProjects();
+  }, [authToken]);
+
+  const handleLogout = () => {
+    clearAuthToken();
+    setAuthTokenState(null);
+  };
+
+  const handleAuthSubmit = async () => {
+    setAuthError(null);
+    const endpoint = authMode === 'register' ? 'register' : 'login';
+    const response = await fetch(`${API_BASE_URL}/auth/${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username,
+        password,
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      setAuthError(text || 'Unable to authenticate.');
+      return;
+    }
+    const payload = (await response.json()) as { token: string };
+    setAuthToken(payload.token);
+    setAuthTokenState(payload.token);
+    setIsAuthOpen(false);
+    setPassword('');
+  };
+
+  const handleCreateProject = async () => {
+    try {
+      const ownerId = getOwnerId();
+      const response = await fetch(`${API_BASE_URL}/projects`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          owner_id: ownerId,
+          name: `Project - ${new Date().toLocaleDateString()}`,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to create project');
+      }
+      const payload = (await response.json()) as { id: string };
+      setActiveProjectId(payload.id);
+      router.push(`/workspace?project=${payload.id}`);
+    } catch {
+      router.push('/workspace');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white">
       <header className="sticky top-0 z-10 border-b border-gray-200 bg-white">
@@ -42,13 +125,26 @@ export default function HomePage() {
             <span>ODIN</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-gray-500">
-            <span className="hidden md:inline">ACCOUNT MENU (coming soon)</span>
-            <button
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-600"
-              aria-label="User menu"
-            >
-              HC
-            </button>
+            {authToken ? (
+              <>
+                <span className="hidden md:inline">Signed in</span>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-700 hover:border-gray-300"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAuthOpen(true)}
+                className="rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-700 hover:border-gray-300"
+              >
+                Log in
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -56,7 +152,7 @@ export default function HomePage() {
       <main className="space-y-16 px-8 py-12">
         <section className="text-center">
           <p className="mx-auto inline-flex items-center rounded-md bg-red-50 px-4 py-1 text-sm font-medium text-red-600">
-            AI assistant for PowerPoint, Google Slides, & Canva
+            AI assistant for Figma, Google Slides, & Canva
           </p>
           <h1 className="mx-auto mt-4 max-w-3xl text-4xl font-semibold text-gray-900 md:text-5xl">
             Create pixel-perfect slide visuals in seconds
@@ -65,16 +161,13 @@ export default function HomePage() {
             Upload a slide screenshot, outline the empty space, and ODIN returns three visuals that match your copy, aspect ratio, and palette.
           </p>
           <div className="mt-8 flex justify-center">
-            <Link
-              href="/workspace"
+            <button
+              type="button"
+              onClick={handleCreateProject}
               className="rounded-xl bg-red-600 px-8 py-4 text-lg font-semibold text-white shadow-soft transition hover:-translate-y-0.5 hover:bg-red-700"
             >
               Start new project
-            </Link>
-          </div>
-          <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-medium text-red-600">
-            <span className="rounded-full bg-red-50 px-4 py-2">Try sample project (coming soon)</span>
-            <span className="rounded-full bg-red-50 px-4 py-2">Watch tutorial (coming soon)</span>
+            </button>
           </div>
         </section>
 
@@ -88,31 +181,41 @@ export default function HomePage() {
             </div>
             <span className="text-red-600">View all (coming soon)</span>
           </div>
-          <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-            {projects.map((project) => (
-              <article
-                key={project.id}
-                className="flex flex-col gap-3 rounded-xl border border-gray-200 p-5 transition hover:-translate-y-0.5 hover:border-red-500"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-red-600">{project.status}</p>
-                  <h3 className="text-lg font-semibold text-gray-900">{project.name}</h3>
-                </div>
-                <p className="text-sm text-gray-500">
-                  {project.updated} · {project.visuals} visuals
-                </p>
-                <span className="inline-flex items-center rounded-md bg-red-50 px-4 py-2 text-sm font-semibold text-red-600">
-                  Continue (placeholder)
-                </span>
-              </article>
-            ))}
-          </div>
+          {projects.length ? (
+            <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {projects.map((project) => (
+                <article
+                  key={project.id}
+                  className="flex flex-col gap-3 rounded-xl border border-gray-200 p-5 transition hover:-translate-y-0.5 hover:border-red-500"
+                >
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-gray-400">Recent</p>
+                    <h3 className="text-lg font-semibold text-gray-900">{project.name}</h3>
+                  </div>
+                  <p className="text-sm text-gray-500">
+                    Updated {new Date(project.updated_at).toLocaleString()} - {project.generation_count} visuals
+                  </p>
+                  <Link
+                    href={`/workspace?project=${project.id}`}
+                    onClick={() => setActiveProjectId(project.id)}
+                    className="inline-flex items-center rounded-md bg-red-50 px-4 py-2 text-sm font-semibold text-red-600"
+                  >
+                    Continue
+                  </Link>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-gray-200 px-6 py-10 text-center text-sm text-gray-500">
+              No recent projects yet. Generate your first visual to see it here.
+            </div>
+          )}
         </section>
 
         <section className="rounded-2xl border border-gray-200 bg-red-50 p-8" aria-labelledby="how-heading">
           <p className="text-xs uppercase tracking-widest text-gray-500">How it works</p>
           <h2 id="how-heading" className="mt-2 text-2xl font-semibold text-gray-900">
-            The 30-second ODIN flow
+            The 1-minute ODIN flow
           </h2>
           <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {steps.map(([title, copy]) => (
@@ -128,6 +231,64 @@ export default function HomePage() {
       <footer className="border-t border-gray-200 py-6 text-center text-sm text-gray-500">
         © {new Date().getFullYear()} ODIN. All rights reserved.
       </footer>
+      {isAuthOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">
+                {authMode === 'register' ? 'Create account' : 'Welcome back'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsAuthOpen(false)}
+                className="text-sm font-semibold text-gray-500 hover:text-gray-700"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm font-medium text-gray-700" htmlFor="username">
+                Username
+                <input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus-visible:border-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-100"
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700" htmlFor="password">
+                Password
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus-visible:border-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-100"
+                />
+              </label>
+              {authError && <p className="text-xs font-semibold text-red-600">{authError}</p>}
+              <button
+                type="button"
+                onClick={handleAuthSubmit}
+                className="w-full rounded-full bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                {authMode === 'register' ? 'Sign up' : 'Log in'}
+              </button>
+            </div>
+            <div className="mt-4 text-center text-sm text-gray-500">
+              {authMode === 'register' ? 'Already have an account?' : 'New here?'}
+              <button
+                type="button"
+                onClick={() => setAuthMode(authMode === 'register' ? 'login' : 'register')}
+                className="ml-2 text-sm font-semibold text-red-600 hover:text-red-700"
+              >
+                {authMode === 'register' ? 'Log in' : 'Sign up'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

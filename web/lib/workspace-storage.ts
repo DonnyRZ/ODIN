@@ -21,6 +21,9 @@ export type WorkspaceProject = {
 };
 
 const PROJECT_STORAGE_KEY = 'odin.workspace.project';
+const OWNER_STORAGE_KEY = 'odin.workspace.owner';
+const ACTIVE_PROJECT_KEY = 'odin.workspace.active_project';
+const AUTH_TOKEN_KEY = 'odin.workspace.auth_token';
 
 const isBrowser = () => typeof window !== 'undefined';
 
@@ -38,6 +41,56 @@ export const createDefaultWorkspaceProject = (): WorkspaceProject => {
     generationError: null,
     pendingSlots: 0,
   };
+};
+
+export const getOwnerId = (): string => {
+  if (!isBrowser()) {
+    return 'local';
+  }
+
+  const existing = window.localStorage.getItem(OWNER_STORAGE_KEY);
+  if (existing) {
+    return existing;
+  }
+
+  const created = window.crypto?.randomUUID?.() ?? `owner-${Date.now()}`;
+  window.localStorage.setItem(OWNER_STORAGE_KEY, created);
+  return created;
+};
+
+export const setActiveProjectId = (projectId: string) => {
+  if (!isBrowser()) {
+    return;
+  }
+  window.localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+};
+
+export const getActiveProjectId = (): string | null => {
+  if (!isBrowser()) {
+    return null;
+  }
+  return window.localStorage.getItem(ACTIVE_PROJECT_KEY);
+};
+
+export const setAuthToken = (token: string) => {
+  if (!isBrowser()) {
+    return;
+  }
+  window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+};
+
+export const getAuthToken = (): string | null => {
+  if (!isBrowser()) {
+    return null;
+  }
+  return window.localStorage.getItem(AUTH_TOKEN_KEY);
+};
+
+export const clearAuthToken = () => {
+  if (!isBrowser()) {
+    return;
+  }
+  window.localStorage.removeItem(AUTH_TOKEN_KEY);
 };
 
 export const loadWorkspaceProject = (): WorkspaceProject => {

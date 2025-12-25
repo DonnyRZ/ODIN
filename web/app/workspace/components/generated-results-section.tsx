@@ -2,13 +2,24 @@
 
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
 
-const downloadImage = (dataUrl: string, filename: string) => {
-  const link = document.createElement('a');
-  link.href = dataUrl;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+const downloadImage = async (imageUrl: string, filename: string) => {
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error('Failed to fetch image');
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    window.open(imageUrl, '_blank', 'noopener');
+  }
 };
 
 const copyImage = async (dataUrl: string) => {
@@ -95,7 +106,9 @@ export function GeneratedResultsSection() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => downloadImage(result.imageUrl, `odin-visual-${result.id}.png`)}
+                    onClick={() => {
+                      void downloadImage(result.imageUrl, `odin-visual-${result.id}.png`);
+                    }}
                     className="rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
                   >
                     Download PNG

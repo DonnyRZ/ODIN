@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
+import { getAuthToken, getOwnerId } from '@/lib/workspace-storage';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
 
@@ -46,13 +47,17 @@ export function GenerationSettingsSection() {
     setPendingSlots(variantCount);
 
     try {
+      const ownerId = getOwnerId();
+      const authToken = getAuthToken();
       const response = await fetch(`${API_BASE_URL}/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
         body: JSON.stringify({
           project_name: project.name,
+          owner_id: ownerId,
           prompt: project.prompt ?? '',
           slide_context: project.prompt ?? '',
           slide_image_base64: project.slideImage,

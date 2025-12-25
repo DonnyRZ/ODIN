@@ -13,9 +13,16 @@ import {
   WorkspaceGenerationResult,
   WorkspaceProject,
   createDefaultWorkspaceProject,
+  getActiveProjectId,
+  getAuthToken,
+  getOwnerId,
   loadWorkspaceProject,
   persistWorkspaceProject,
+  setActiveProjectId,
 } from '@/lib/workspace-storage';
+import { useSearchParams } from 'next/navigation';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
 
 type WorkspaceProjectContextValue = {
   project: WorkspaceProject;
@@ -26,6 +33,7 @@ type WorkspaceProjectContextValue = {
   appendGenerationResults: (results: WorkspaceGenerationResult[]) => void;
   setGenerationState: (state: WorkspaceProject['generationStatus'], error?: string | null) => void;
   setPendingSlots: (count: number) => void;
+  renameProject: (name: string) => Promise<void>;
 };
 
 const WorkspaceProjectContext = createContext<WorkspaceProjectContextValue | undefined>(undefined);
@@ -33,17 +41,109 @@ const WorkspaceProjectContext = createContext<WorkspaceProjectContextValue | und
 export function WorkspaceProjectProvider({ children }: { children: ReactNode }) {
   const [project, setProject] = useState<WorkspaceProject>(() => createDefaultWorkspaceProject());
   const [isHydrated, setIsHydrated] = useState(false);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
-    const loaded = loadWorkspaceProject();
-    const resetState: WorkspaceProject = {
-      ...loaded,
-      generationStatus: 'idle',
-      generationError: null,
+    const ownerId = getOwnerId();
+    const authToken = getAuthToken();
+    const projectIdFromUrl = searchParams.get('project') || getActiveProjectId();
+    const fallback = loadWorkspaceProject();
+
+    const hydrate = async () => {
+      try {
+        const listResponse = await fetch(`${API_BASE_URL}/projects?owner_id=${ownerId}`, {
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+        });
+        if (!listResponse.ok) {
+          throw new Error('Failed to load projects');
+        }
+        const listPayload = (await listResponse.json()) as {
+          projects: Array<{
+            id: string;
+            name: string;
+            created_at: string;
+            updated_at: string;
+            last_prompt?: string;
+          }>;
+        };
+
+        if (!listPayload.projects.length) {
+          const resetState: WorkspaceProject = {
+            ...fallback,
+            generationStatus: 'idle',
+            generationError: null,
+          };
+          setProject(resetState);
+          persistWorkspaceProject(resetState);
+          setIsHydrated(true);
+          return;
+        }
+
+        const activeProject =
+          listPayload.projects.find((entry) => entry.id === projectIdFromUrl) ?? listPayload.projects[0];
+        const projectResponse = await fetch(
+          `${API_BASE_URL}/projects/${activeProject.id}?owner_id=${ownerId}`,
+          {
+            headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+          },
+        );
+        if (!projectResponse.ok) {
+          throw new Error('Failed to load project');
+        }
+        const projectPayload = (await projectResponse.json()) as {
+          project: {
+            id: string;
+            name: string;
+            created_at: string;
+            updated_at: string;
+            last_prompt?: string;
+            last_slide_context?: string;
+          };
+          generations: Array<{
+            id: string;
+            image_path: string;
+            description: string;
+            aspect_ratio: string;
+            created_at: string;
+          }>;
+        };
+
+        const hydrated: WorkspaceProject = {
+          id: projectPayload.project.id,
+          name: projectPayload.project.name,
+          createdAt: projectPayload.project.created_at,
+          updatedAt: projectPayload.project.updated_at,
+          autosaveStatus: 'ready',
+          prompt: projectPayload.project.last_prompt ?? '',
+          results: projectPayload.generations.map((generation) => ({
+            id: generation.id,
+            imageUrl: `${API_BASE_URL}/generations/${generation.id}/image`,
+            description: generation.description,
+            createdAt: generation.created_at,
+            source: 'api',
+          })),
+          generationStatus: 'idle',
+          generationError: null,
+          pendingSlots: 0,
+        };
+
+        setProject(hydrated);
+        persistWorkspaceProject(hydrated);
+        setActiveProjectId(projectPayload.project.id);
+        setIsHydrated(true);
+      } catch {
+        const resetState: WorkspaceProject = {
+          ...fallback,
+          generationStatus: 'idle',
+          generationError: null,
+        };
+        setProject(resetState);
+        persistWorkspaceProject(resetState);
+        setIsHydrated(true);
+      }
     };
-    setProject(resetState);
-    persistWorkspaceProject(resetState);
-    setIsHydrated(true);
+
+    hydrate();
   }, []);
 
   const updateProject = useCallback((updates: Partial<WorkspaceProject>) => {
@@ -122,6 +222,31 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
     });
   }, []);
 
+  const renameProject = useCallback(
+    async (name: string) => {
+      const ownerId = getOwnerId();
+      const authToken = getAuthToken();
+      const response = await fetch(`${API_BASE_URL}/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          owner_id: ownerId,
+          name,
+          prompt: project.prompt ?? '',
+          slide_context: project.prompt ?? '',
+        }),
+      });
+      if (!response.ok) {
+        throw new Error('Unable to rename project.');
+      }
+      updateProject({ name });
+    },
+    [project.id, project.prompt, updateProject],
+  );
+
   const value = useMemo(
     () => ({
       project,
@@ -132,6 +257,7 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
       appendGenerationResults,
       setGenerationState,
       setPendingSlots,
+      renameProject,
     }),
     [
       project,
@@ -142,6 +268,7 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
       appendGenerationResults,
       setGenerationState,
       setPendingSlots,
+      renameProject,
     ],
   );
 

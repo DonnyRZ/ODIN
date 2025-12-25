@@ -18,15 +18,18 @@ const readFileAsDataUrl = (file: File) =>
   });
 
 export function ControlPanel() {
-  const { project, updateProject } = useWorkspaceProject();
+  const { project, updateProject, renameProject } = useWorkspaceProject();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleRename = (nextName: string) => {
+  const handleRename = async (nextName: string) => {
     const trimmed = nextName.trim();
-    updateProject({
-      name: trimmed.length ? trimmed : 'Untitled project',
-    });
+    const name = trimmed.length ? trimmed : 'Untitled project';
+    try {
+      await renameProject(name);
+    } catch {
+      updateProject({ name });
+    }
   };
 
   const handleSlideUpload = async (file: File) => {

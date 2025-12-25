@@ -25,8 +25,10 @@ from .core.db import (
   get_user_id_for_token,
   init_db,
   insert_generation,
+  list_generation_image_paths,
   list_generations,
   list_projects,
+  delete_project,
   update_project_name,
   save_generated_image,
 )
@@ -148,6 +150,24 @@ async def get_project_handler(request: Request, project_id: str, owner_id: str =
       raise HTTPException(status_code=404, detail="Project not found.")
     generations = list_generations(conn, project_id)
   return {"project": project, "generations": generations}
+
+
+@app.delete("/projects/{project_id}", tags=["projects"])
+async def delete_project_handler(request: Request, project_id: str, owner_id: str = "local"):
+  resolved_owner = _resolve_owner_id(request, owner_id)
+  with db_connection() as conn:
+    image_paths = list_generation_image_paths(conn, project_id)
+    deleted = delete_project(conn, resolved_owner, project_id)
+  if not deleted:
+    raise HTTPException(status_code=404, detail="Project not found.")
+  for image_path in image_paths:
+    full_path = (DATA_DIR / image_path).resolve()
+    if DATA_DIR in full_path.parents and full_path.exists():
+      try:
+        full_path.unlink()
+      except OSError:
+        logger.warning("Failed to delete image file: %s", full_path)
+  return {"id": project_id}
 
 
 @app.get("/generations/{generation_id}/image", tags=["generations"])

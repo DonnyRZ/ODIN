@@ -119,9 +119,9 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-white">
       <header className="sticky top-0 z-10 border-b border-gray-200 bg-white">
-        <div className="flex w-full items-center justify-between px-8 py-4">
+        <div className="flex w-full items-center justify-between px-8 py-1">
           <div className="flex items-center gap-3 font-semibold tracking-wide text-gray-900">
-            <Image src="/logo.png" width={40} height={40} alt="ODIN logo" priority />
+            <Image src="/logo.png" width={70} height={70} alt="ODIN logo" priority />
             <span>ODIN</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-gray-500">

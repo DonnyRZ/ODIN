@@ -416,9 +416,32 @@ def list_generations(conn: sqlite3.Connection, project_id: str) -> list[dict]:
   return [dict(row) for row in rows]
 
 
+def list_generation_image_paths(conn: sqlite3.Connection, project_id: str) -> list[str]:
+  rows = conn.execute(
+    """
+    SELECT image_path
+    FROM generations
+    WHERE project_id = ?
+    """,
+    (project_id,),
+  ).fetchall()
+  return [str(row["image_path"]) for row in rows]
+
+
 def get_generation_image_path(conn: sqlite3.Connection, generation_id: str) -> Optional[str]:
   row = conn.execute(
     "SELECT image_path FROM generations WHERE id = ?",
     (generation_id,),
   ).fetchone()
   return str(row["image_path"]) if row else None
+
+
+def delete_project(conn: sqlite3.Connection, owner_id: str, project_id: str) -> bool:
+  cursor = conn.execute(
+    """
+    DELETE FROM projects
+    WHERE owner_id = ? AND id = ?
+    """,
+    (owner_id, project_id),
+  )
+  return cursor.rowcount > 0

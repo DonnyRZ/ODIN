@@ -65,6 +65,13 @@ export const setActiveProjectId = (projectId: string) => {
   window.localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
 };
 
+export const clearActiveProjectId = () => {
+  if (!isBrowser()) {
+    return;
+  }
+  window.localStorage.removeItem(ACTIVE_PROJECT_KEY);
+};
+
 export const getActiveProjectId = (): string | null => {
   if (!isBrowser()) {
     return null;

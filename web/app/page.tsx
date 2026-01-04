@@ -6,11 +6,10 @@ import Link from 'next/link';
 import {
   clearAuthToken,
   getAuthToken,
-  getOwnerId,
   setActiveProjectId,
   setAuthToken,
 } from '@/lib/workspace-storage';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
 
@@ -34,19 +33,38 @@ export default function HomePage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [authToken, setAuthTokenState] = useState<string | null>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
-    setAuthTokenState(getAuthToken());
+    const storedToken = getAuthToken();
+    setAuthTokenState(storedToken);
+    if (!storedToken) {
+      setIsAuthOpen(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (searchParams.get('auth') === '1') {
+      setIsAuthOpen(true);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!authToken) {
+      setProjects([]);
+      return;
+    }
     const loadProjects = async () => {
       try {
-        const ownerId = getOwnerId();
-        const response = await fetch(`${API_BASE_URL}/projects?owner_id=${ownerId}`, {
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+        const response = await fetch(`${API_BASE_URL}/projects`, {
+          headers: { Authorization: `Bearer ${authToken}` },
         });
         if (!response.ok) {
           return;
@@ -64,44 +82,99 @@ export default function HomePage() {
   const handleLogout = () => {
     clearAuthToken();
     setAuthTokenState(null);
+    setIsAuthOpen(true);
+  };
+
+  const readErrorMessage = async (response: Response) => {
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload?.detail) {
+        return payload.detail;
+      }
+    } catch {
+      // Fall back to plain text.
+    }
+    return (await response.text()) || 'Unable to authenticate.';
   };
 
   const handleAuthSubmit = async () => {
+    console.log('[auth] submit', { authMode, email, username });
     setAuthError(null);
-    const endpoint = authMode === 'register' ? 'register' : 'login';
-    const response = await fetch(`${API_BASE_URL}/auth/${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        username,
-        password,
-      }),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      setAuthError(text || 'Unable to authenticate.');
+    setAuthNotice(null);
+    let endpoint = 'login';
+    const body: Record<string, string> = {};
+
+    if (authMode === 'register') {
+      endpoint = 'register';
+      body.email = email;
+      body.username = username;
+      body.password = password;
+    } else if (authMode === 'forgot') {
+      endpoint = 'forgot-password';
+      body.email = email;
+    } else {
+      endpoint = 'login';
+      body.email = email;
+      body.password = password;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      console.log('[auth] response', endpoint, response.status);
+
+      if (!response.ok) {
+        const text = await readErrorMessage(response);
+        setAuthError(text);
       return;
     }
-    const payload = (await response.json()) as { token: string };
-    setAuthToken(payload.token);
-    setAuthTokenState(payload.token);
-    setIsAuthOpen(false);
-    setPassword('');
+
+      if (authMode === 'login') {
+        const payload = (await response.json()) as { token: string };
+        setAuthToken(payload.token);
+        setAuthTokenState(payload.token);
+        setIsAuthOpen(false);
+        setPassword('');
+        return;
+      }
+
+    if (authMode === 'register') {
+      setAuthNotice('Welcome to ODIN! Check your inbox for a welcome email.');
+      setAuthMode('login');
+      setPassword('');
+      return;
+      }
+
+      setAuthNotice('If an account exists, a reset email has been sent.');
+      setAuthMode('login');
+    } catch (error) {
+      console.error('[auth] request failed', error);
+      setAuthError('Unable to reach the server. Check API base URL and backend status.');
+    }
   };
 
   const handleCreateProject = async () => {
+    if (!authToken) {
+      setAuthMode('login');
+      setAuthError(null);
+      setAuthNotice(null);
+      setIsAuthOpen(true);
+      return;
+    }
     try {
-      const ownerId = getOwnerId();
       const response = await fetch(`${API_BASE_URL}/projects`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
-          owner_id: ownerId,
           name: `Project - ${new Date().toLocaleDateString()}`,
         }),
       });
@@ -121,7 +194,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-10 border-b border-gray-200 bg-white">
         <div className="flex w-full items-center justify-between px-8 py-1">
           <div className="flex items-center gap-3 font-semibold tracking-wide text-gray-900">
-            <Image src="/logo.png" width={70} height={70} alt="ODIN logo" priority />
+            <Image src="/logo.jpeg" width={70} height={70} alt="ODIN logo" priority />
             <span>ODIN</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-gray-500">
@@ -139,7 +212,12 @@ export default function HomePage() {
             ) : (
               <button
                 type="button"
-                onClick={() => setIsAuthOpen(true)}
+                onClick={() => {
+                  setAuthMode('login');
+                  setAuthError(null);
+                  setAuthNotice(null);
+                  setIsAuthOpen(true);
+                }}
                 className="rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-700 hover:border-gray-300"
               >
                 Log in
@@ -181,33 +259,39 @@ export default function HomePage() {
             </div>
             <span className="text-red-600">View all (coming soon)</span>
           </div>
-          {projects.length ? (
-            <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-              {projects.map((project) => (
-                <article
-                  key={project.id}
-                  className="flex flex-col gap-3 rounded-xl border border-gray-200 p-5 transition hover:-translate-y-0.5 hover:border-red-500"
-                >
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-gray-400">Recent</p>
-                    <h3 className="text-lg font-semibold text-gray-900">{project.name}</h3>
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    Updated {new Date(project.updated_at).toLocaleString()} - {project.generation_count} visuals
-                  </p>
-                  <Link
-                    href={`/workspace?project=${project.id}`}
-                    onClick={() => setActiveProjectId(project.id)}
-                    className="inline-flex items-center rounded-md bg-red-50 px-4 py-2 text-sm font-semibold text-red-600"
+          {authToken ? (
+            projects.length ? (
+              <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+                {projects.map((project) => (
+                  <article
+                    key={project.id}
+                    className="flex flex-col gap-3 rounded-xl border border-gray-200 p-5 transition hover:-translate-y-0.5 hover:border-red-500"
                   >
-                    Continue
-                  </Link>
-                </article>
-              ))}
-            </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-gray-400">Recent</p>
+                      <h3 className="text-lg font-semibold text-gray-900">{project.name}</h3>
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      Updated {new Date(project.updated_at).toLocaleString()} - {project.generation_count} visuals
+                    </p>
+                    <Link
+                      href={`/workspace?project=${project.id}`}
+                      onClick={() => setActiveProjectId(project.id)}
+                      className="inline-flex items-center rounded-md bg-red-50 px-4 py-2 text-sm font-semibold text-red-600"
+                    >
+                      Continue
+                    </Link>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-gray-200 px-6 py-10 text-center text-sm text-gray-500">
+                No recent projects yet. Generate your first visual to see it here.
+              </div>
+            )
           ) : (
             <div className="rounded-2xl border border-dashed border-gray-200 px-6 py-10 text-center text-sm text-gray-500">
-              No recent projects yet. Generate your first visual to see it here.
+              Log in to see your saved projects.
             </div>
           )}
         </section>
@@ -236,7 +320,11 @@ export default function HomePage() {
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">
-                {authMode === 'register' ? 'Create account' : 'Welcome back'}
+                {authMode === 'register'
+                  ? 'Create account'
+                  : authMode === 'forgot'
+                    ? 'Reset your password'
+                    : 'Welcome back'}
               </h2>
               <button
                 type="button"
@@ -247,45 +335,87 @@ export default function HomePage() {
               </button>
             </div>
             <div className="mt-4 space-y-3">
-              <label className="block text-sm font-medium text-gray-700" htmlFor="username">
-                Username
+              <label className="block text-sm font-medium text-gray-700" htmlFor="email">
+                Email
                 <input
-                  id="username"
-                  type="text"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
                   className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus-visible:border-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-100"
                 />
               </label>
-              <label className="block text-sm font-medium text-gray-700" htmlFor="password">
-                Password
-                <input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus-visible:border-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-100"
-                />
-              </label>
+              {authMode === 'register' && (
+                <label className="block text-sm font-medium text-gray-700" htmlFor="username">
+                  Username
+                  <input
+                    id="username"
+                    type="text"
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus-visible:border-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-100"
+                  />
+                </label>
+              )}
+              {authMode !== 'forgot' && (
+                <label className="block text-sm font-medium text-gray-700" htmlFor="password">
+                  Password
+                  <input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus-visible:border-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-100"
+                  />
+                </label>
+              )}
+              {authNotice && <p className="text-xs font-semibold text-emerald-600">{authNotice}</p>}
               {authError && <p className="text-xs font-semibold text-red-600">{authError}</p>}
               <button
                 type="button"
                 onClick={handleAuthSubmit}
                 className="w-full rounded-full bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700"
               >
-                {authMode === 'register' ? 'Sign up' : 'Log in'}
+                {authMode === 'register'
+                  ? 'Sign up'
+                  : authMode === 'forgot'
+                    ? 'Send reset link'
+                    : 'Log in'}
               </button>
             </div>
             <div className="mt-4 text-center text-sm text-gray-500">
-              {authMode === 'register' ? 'Already have an account?' : 'New here?'}
-              <button
-                type="button"
-                onClick={() => setAuthMode(authMode === 'register' ? 'login' : 'register')}
-                className="ml-2 text-sm font-semibold text-red-600 hover:text-red-700"
-              >
-                {authMode === 'register' ? 'Log in' : 'Sign up'}
-              </button>
+              {authMode === 'forgot' ? (
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('login')}
+                  className="text-sm font-semibold text-red-600 hover:text-red-700"
+                >
+                  Back to login
+                </button>
+              ) : (
+                <>
+                  {authMode === 'register' ? 'Already have an account?' : 'New here?'}
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode(authMode === 'register' ? 'login' : 'register')}
+                    className="ml-2 text-sm font-semibold text-red-600 hover:text-red-700"
+                  >
+                    {authMode === 'register' ? 'Log in' : 'Sign up'}
+                  </button>
+                </>
+              )}
             </div>
+            {authMode === 'login' && (
+              <div className="mt-3 text-center text-xs text-gray-500">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('forgot')}
+                  className="text-xs font-semibold text-red-600 hover:text-red-700"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

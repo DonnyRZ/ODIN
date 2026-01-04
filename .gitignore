@@ -31,6 +31,7 @@ client_secret_*.json
 
 # Test directories
 ai-tests/
+test-onboarding/
 
 # Environment variables
 .env
@@ -69,8 +70,9 @@ temp/
 
 # Project files to ignore (current workspace snapshot)
 DESIGN_RULES.md
-# ODIN.md
+ODIN.md
 TECH_STACK.md
+README.md
 
 # Next.js build artifacts
 web/.next/

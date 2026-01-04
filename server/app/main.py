@@ -11,17 +11,20 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
-from .core.auth import hash_password, verify_google_token, verify_password
+from .core.auth import hash_password, verify_password
+from .core.config import get_settings
 from .core.db import (
   DATA_DIR,
   create_user_with_password,
   create_session,
+  create_password_reset_token,
   db_connection,
+  get_generation_image_path_for_user,
+  get_user_by_email,
   get_user_by_username,
-  get_or_create_user,
-  get_generation_image_path,
   get_or_create_project,
   get_project,
+  get_project_slide_image_path,
   get_user_id_for_token,
   init_db,
   insert_generation,
@@ -29,10 +32,15 @@ from .core.db import (
   list_generations,
   list_projects,
   delete_project,
+  consume_password_reset_token,
+  update_user_password,
   update_project_name,
   save_generated_image,
+  save_slide_image,
+  update_project_slide_image,
 )
 from .schemas import GenerateRequest, HealthResponse
+from .services.email_client import send_email
 from .services.genai_client import genai_client
 from .services.rembg_client import remove_background
 
@@ -61,16 +69,62 @@ def _sse_event(event: str, payload: dict) -> bytes:
   return f"event: {event}\ndata: {data}\n\n".encode("utf-8")
 
 
-def _resolve_owner_id(request: Request, fallback: str) -> str:
+def _require_user_id(request: Request) -> str:
   auth_header = request.headers.get("Authorization", "")
-  if auth_header.startswith("Bearer "):
-    token = auth_header.replace("Bearer ", "").strip()
-    now = datetime.utcnow().isoformat() + "Z"
-    with db_connection() as conn:
-      user_id = get_user_id_for_token(conn, token, now)
-    if user_id:
-      return user_id
-  return fallback
+  if not auth_header.startswith("Bearer "):
+    raise HTTPException(status_code=401, detail="Authorization required.")
+  token = auth_header.replace("Bearer ", "").strip()
+  now = datetime.utcnow().isoformat() + "Z"
+  with db_connection() as conn:
+    user_id = get_user_id_for_token(conn, token, now)
+  if not user_id:
+    raise HTTPException(status_code=401, detail="Invalid or expired session.")
+  return user_id
+
+
+def _send_welcome_email(email: str, username: str) -> None:
+  body = (
+    f"Welcome to ODIN, {username}.\n\n"
+    "We're excited to have you on board. Your workspace is ready.\n"
+    "If you did not create this account, you can ignore this email."
+  )
+  send_email(email, "Welcome to ODIN", body)
+
+
+def _send_reset_email(email: str, token: str) -> None:
+  settings = get_settings()
+  reset_url = f"{settings.frontend_base_url}/reset?token={token}"
+  body = (
+    "We received a request to reset your ODIN password.\n\n"
+    "Set a new password here:\n"
+    f"{reset_url}\n\n"
+    "If you did not request a reset, you can ignore this email."
+  )
+  send_email(email, "Reset your ODIN password", body)
+
+
+def _normalize_email(email: str) -> str:
+  return email.strip().lower()
+
+
+def _is_valid_email(email: str) -> bool:
+  if "@" not in email:
+    return False
+  domain = email.split("@")[-1]
+  return "." in domain
+
+
+def _decode_image_data(data_url: str) -> bytes:
+  if not data_url:
+    raise ValueError("Slide image missing.")
+  if data_url.startswith("data:"):
+    _, b64data = data_url.split(",", 1)
+  else:
+    b64data = data_url
+  try:
+    return base64.b64decode(b64data)
+  except Exception as exc:
+    raise ValueError("Invalid slide image data.") from exc
 
 app.add_middleware(
   CORSMiddleware,
@@ -92,16 +146,16 @@ async def health_check() -> HealthResponse:
 
 
 @app.get("/projects", tags=["projects"])
-async def list_projects_handler(request: Request, owner_id: str = "local"):
-  resolved_owner = _resolve_owner_id(request, owner_id)
+async def list_projects_handler(request: Request):
+  owner_id = _require_user_id(request)
   with db_connection() as conn:
-    projects = list_projects(conn, resolved_owner)
+    projects = list_projects(conn, owner_id)
   return {"projects": projects}
 
 
 @app.post("/projects", tags=["projects"])
 async def create_project_handler(request: Request, payload: dict):
-  owner_id = _resolve_owner_id(request, payload.get("owner_id") or "local")
+  owner_id = _require_user_id(request)
   name = payload.get("name") or "Untitled project"
   timestamp = datetime.utcnow().isoformat() + "Z"
   with db_connection() as conn:
@@ -118,7 +172,7 @@ async def create_project_handler(request: Request, payload: dict):
 
 @app.patch("/projects/{project_id}", tags=["projects"])
 async def update_project_handler(request: Request, project_id: str, payload: dict):
-  owner_id = _resolve_owner_id(request, payload.get("owner_id") or "local")
+  owner_id = _require_user_id(request)
   name = payload.get("name")
   if not name:
     raise HTTPException(status_code=400, detail="Project name required.")
@@ -142,8 +196,8 @@ async def update_project_handler(request: Request, project_id: str, payload: dic
 
 
 @app.get("/projects/{project_id}", tags=["projects"])
-async def get_project_handler(request: Request, project_id: str, owner_id: str = "local"):
-  resolved_owner = _resolve_owner_id(request, owner_id)
+async def get_project_handler(request: Request, project_id: str):
+  resolved_owner = _require_user_id(request)
   with db_connection() as conn:
     project = get_project(conn, resolved_owner, project_id)
     if not project:
@@ -152,14 +206,82 @@ async def get_project_handler(request: Request, project_id: str, owner_id: str =
   return {"project": project, "generations": generations}
 
 
-@app.delete("/projects/{project_id}", tags=["projects"])
-async def delete_project_handler(request: Request, project_id: str, owner_id: str = "local"):
-  resolved_owner = _resolve_owner_id(request, owner_id)
+@app.post("/projects/{project_id}/slide-image", tags=["projects"])
+async def upload_project_slide_image(request: Request, project_id: str, payload: dict):
+  owner_id = _require_user_id(request)
+  image_data = payload.get("slide_image_base64") or ""
+  try:
+    image_bytes = _decode_image_data(image_data)
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  image_path = save_slide_image(image_bytes, project_id)
+  updated_at = datetime.utcnow().isoformat() + "Z"
   with db_connection() as conn:
+    updated = update_project_slide_image(
+      conn,
+      owner_id=owner_id,
+      project_id=project_id,
+      slide_image_path=image_path,
+      updated_at=updated_at,
+    )
+  if not updated:
+    raise HTTPException(status_code=404, detail="Project not found.")
+  return {"slide_image_path": image_path, "updated_at": updated_at}
+
+
+@app.get("/projects/{project_id}/slide-image", tags=["projects"])
+async def get_project_slide_image(request: Request, project_id: str):
+  owner_id = _require_user_id(request)
+  with db_connection() as conn:
+    image_path = get_project_slide_image_path(conn, owner_id=owner_id, project_id=project_id)
+  if not image_path:
+    raise HTTPException(status_code=404, detail="Slide image not found.")
+  full_path = (DATA_DIR / image_path).resolve()
+  if not full_path.exists():
+    raise HTTPException(status_code=404, detail="Slide image file missing.")
+  return FileResponse(full_path, media_type="image/png")
+
+
+@app.delete("/projects/{project_id}/slide-image", tags=["projects"])
+async def delete_project_slide_image(request: Request, project_id: str):
+  owner_id = _require_user_id(request)
+  with db_connection() as conn:
+    image_path = get_project_slide_image_path(conn, owner_id=owner_id, project_id=project_id)
+    updated = update_project_slide_image(
+      conn,
+      owner_id=owner_id,
+      project_id=project_id,
+      slide_image_path=None,
+      updated_at=datetime.utcnow().isoformat() + "Z",
+    )
+  if not updated:
+    raise HTTPException(status_code=404, detail="Project not found.")
+  if image_path:
+    full_path = (DATA_DIR / image_path).resolve()
+    if DATA_DIR in full_path.parents and full_path.exists():
+      try:
+        full_path.unlink()
+      except OSError:
+        logger.warning("Failed to delete slide image file: %s", full_path)
+  return {"id": project_id}
+
+
+@app.delete("/projects/{project_id}", tags=["projects"])
+async def delete_project_handler(request: Request, project_id: str):
+  resolved_owner = _require_user_id(request)
+  with db_connection() as conn:
+    slide_image_path = get_project_slide_image_path(conn, owner_id=resolved_owner, project_id=project_id)
     image_paths = list_generation_image_paths(conn, project_id)
     deleted = delete_project(conn, resolved_owner, project_id)
   if not deleted:
     raise HTTPException(status_code=404, detail="Project not found.")
+  if slide_image_path:
+    full_path = (DATA_DIR / slide_image_path).resolve()
+    if DATA_DIR in full_path.parents and full_path.exists():
+      try:
+        full_path.unlink()
+      except OSError:
+        logger.warning("Failed to delete slide image file: %s", full_path)
   for image_path in image_paths:
     full_path = (DATA_DIR / image_path).resolve()
     if DATA_DIR in full_path.parents and full_path.exists():
@@ -172,9 +294,9 @@ async def delete_project_handler(request: Request, project_id: str, owner_id: st
 
 @app.get("/generations/{generation_id}/image", tags=["generations"])
 async def get_generation_image(request: Request, generation_id: str):
-  _ = _resolve_owner_id(request, "local")
+  owner_id = _require_user_id(request)
   with db_connection() as conn:
-    image_path = get_generation_image_path(conn, generation_id)
+    image_path = get_generation_image_path_for_user(conn, generation_id=generation_id, owner_id=owner_id)
   if not image_path:
     raise HTTPException(status_code=404, detail="Image not found.")
   full_path = (DATA_DIR / image_path).resolve()
@@ -191,10 +313,11 @@ async def generate_visuals(request: Request, payload: GenerateRequest):
   if not payload.slide_image_base64:
     raise HTTPException(status_code=400, detail="Slide image is required.")
 
+  owner_id = _require_user_id(request)
+
   async def event_stream():
     with db_connection() as conn:
       updated_at = datetime.utcnow().isoformat() + "Z"
-      owner_id = _resolve_owner_id(request, payload.owner_id or "local")
       project_id = get_or_create_project(
         conn,
         owner_id=owner_id,
@@ -276,33 +399,13 @@ async def generate_visuals(request: Request, payload: GenerateRequest):
   return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@app.post("/auth/google", tags=["auth"])
-async def google_auth(payload: dict):
-  token = payload.get("id_token")
-  if not token:
-    raise HTTPException(status_code=400, detail="id_token required.")
-  user = verify_google_token(token)
-  if not user:
-    raise HTTPException(status_code=401, detail="Invalid token.")
-
-  created_at = datetime.utcnow().isoformat() + "Z"
-  expires_at = (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
-  with db_connection() as conn:
-    user_id = get_or_create_user(
-      conn,
-      google_sub=user.sub,
-      email=user.email,
-      name=user.name,
-      created_at=created_at,
-    )
-    session_token = create_session(conn, user_id=user_id, created_at=created_at, expires_at=expires_at)
-  return {"token": session_token, "user_id": user_id, "email": user.email, "name": user.name}
-
-
 @app.post("/auth/register", tags=["auth"])
 async def register_user(payload: dict):
+  email = _normalize_email(payload.get("email") or "")
   username = (payload.get("username") or "").strip()
   password = payload.get("password") or ""
+  if not _is_valid_email(email):
+    raise HTTPException(status_code=400, detail="Valid email required.")
   if len(username) < 3:
     raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
   if len(password) < 8:
@@ -310,33 +413,35 @@ async def register_user(payload: dict):
 
   created_at = datetime.utcnow().isoformat() + "Z"
   with db_connection() as conn:
+    if get_user_by_email(conn, email):
+      raise HTTPException(status_code=409, detail="Email already exists.")
     if get_user_by_username(conn, username):
       raise HTTPException(status_code=409, detail="Username already exists.")
     password_hash = hash_password(password)
     user_id = create_user_with_password(
       conn,
+      email=email,
       username=username,
       password_hash=password_hash,
+      name=username,
       created_at=created_at,
     )
-    session_token = create_session(
-      conn,
-      user_id=user_id,
-      created_at=created_at,
-      expires_at=(datetime.utcnow() + timedelta(days=7)).isoformat() + "Z",
-    )
-  return {"token": session_token, "user_id": user_id, "username": username}
+  try:
+    _send_welcome_email(email, username)
+  except Exception as exc:
+    logger.warning("Failed to send welcome email: %s", exc)
+  return {"message": "Account created."}
 
 
 @app.post("/auth/login", tags=["auth"])
 async def login_user(payload: dict):
-  username = (payload.get("username") or "").strip()
+  email = _normalize_email(payload.get("email") or "")
   password = payload.get("password") or ""
-  if not username or not password:
-    raise HTTPException(status_code=400, detail="Username and password required.")
+  if not email or not password:
+    raise HTTPException(status_code=400, detail="Email and password required.")
   now = datetime.utcnow().isoformat() + "Z"
   with db_connection() as conn:
-    user = get_user_by_username(conn, username)
+    user = get_user_by_email(conn, email)
     if not user or not user.get("password_hash"):
       raise HTTPException(status_code=401, detail="Invalid credentials.")
     if not verify_password(password, user["password_hash"]):
@@ -347,4 +452,49 @@ async def login_user(payload: dict):
       created_at=now,
       expires_at=(datetime.utcnow() + timedelta(days=7)).isoformat() + "Z",
     )
-  return {"token": session_token, "user_id": user["id"], "username": username}
+  return {
+    "token": session_token,
+    "user_id": user["id"],
+    "username": user["username"],
+    "email": user["email"],
+  }
+
+
+@app.post("/auth/forgot-password", tags=["auth"])
+async def forgot_password(payload: dict):
+  email = _normalize_email(payload.get("email") or "")
+  if not _is_valid_email(email):
+    raise HTTPException(status_code=400, detail="Valid email required.")
+  settings = get_settings()
+  with db_connection() as conn:
+    user = get_user_by_email(conn, email)
+    if user and user.get("email_verified"):
+      token = create_password_reset_token(
+        conn,
+        user_id=user["id"],
+        created_at=datetime.utcnow().isoformat() + "Z",
+        expires_at=(datetime.utcnow() + timedelta(hours=settings.reset_token_hours)).isoformat() + "Z",
+      )
+      try:
+        _send_reset_email(email, token)
+      except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+  return {"message": "If an account exists, a reset email has been sent."}
+
+
+@app.post("/auth/reset-password", tags=["auth"])
+async def reset_password(payload: dict):
+  token = (payload.get("token") or "").strip()
+  password = payload.get("password") or ""
+  if not token:
+    raise HTTPException(status_code=400, detail="Reset token required.")
+  if len(password) < 8:
+    raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+  now = datetime.utcnow().isoformat() + "Z"
+  with db_connection() as conn:
+    user_id = consume_password_reset_token(conn, token=token, now=now)
+    if not user_id:
+      raise HTTPException(status_code=400, detail="Invalid or expired token.")
+    password_hash = hash_password(password)
+    update_user_password(conn, user_id, password_hash)
+  return {"message": "Password updated."}

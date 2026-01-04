@@ -15,7 +15,6 @@ import {
   createDefaultWorkspaceProject,
   getActiveProjectId,
   getAuthToken,
-  getOwnerId,
   loadWorkspaceProject,
   persistWorkspaceProject,
   setActiveProjectId,
@@ -44,15 +43,26 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const ownerId = getOwnerId();
     const authToken = getAuthToken();
     const projectIdFromUrl = searchParams.get('project') || getActiveProjectId();
     const fallback = loadWorkspaceProject();
 
     const hydrate = async () => {
       try {
-        const listResponse = await fetch(`${API_BASE_URL}/projects?owner_id=${ownerId}`, {
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+        if (!authToken) {
+          const resetState: WorkspaceProject = {
+            ...fallback,
+            generationStatus: 'idle',
+            generationError: null,
+          };
+          setProject(resetState);
+          persistWorkspaceProject(resetState);
+          setIsHydrated(true);
+          return;
+        }
+
+        const listResponse = await fetch(`${API_BASE_URL}/projects`, {
+          headers: { Authorization: `Bearer ${authToken}` },
         });
         if (!listResponse.ok) {
           throw new Error('Failed to load projects');
@@ -82,9 +92,9 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
         const activeProject =
           listPayload.projects.find((entry) => entry.id === projectIdFromUrl) ?? listPayload.projects[0];
         const projectResponse = await fetch(
-          `${API_BASE_URL}/projects/${activeProject.id}?owner_id=${ownerId}`,
+          `${API_BASE_URL}/projects/${activeProject.id}`,
           {
-            headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+            headers: { Authorization: `Bearer ${authToken}` },
           },
         );
         if (!projectResponse.ok) {
@@ -98,6 +108,7 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
             updated_at: string;
             last_prompt?: string;
             last_slide_context?: string;
+            slide_image_path?: string | null;
           };
           generations: Array<{
             id: string;
@@ -108,6 +119,52 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
           }>;
         };
 
+        const results: WorkspaceGenerationResult[] = await Promise.all(
+          projectPayload.generations.map(async (generation) => {
+            const imageResponse = await fetch(
+              `${API_BASE_URL}/generations/${generation.id}/image`,
+              {
+                headers: { Authorization: `Bearer ${authToken}` },
+              },
+            );
+            if (!imageResponse.ok) {
+              throw new Error('Failed to load image.');
+            }
+            const blob = await imageResponse.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            return {
+              id: generation.id,
+              imageUrl: objectUrl,
+              description: generation.description,
+              createdAt: generation.created_at,
+              source: 'api',
+            };
+          }),
+        );
+
+        let slideImage: string | undefined;
+        if (projectPayload.project.slide_image_path) {
+          try {
+            const slideResponse = await fetch(
+              `${API_BASE_URL}/projects/${projectPayload.project.id}/slide-image`,
+              {
+                headers: { Authorization: `Bearer ${authToken}` },
+              },
+            );
+            if (slideResponse.ok) {
+              const slideBlob = await slideResponse.blob();
+              slideImage = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(slideBlob);
+              });
+            }
+          } catch {
+            slideImage = undefined;
+          }
+        }
+
         const hydrated: WorkspaceProject = {
           id: projectPayload.project.id,
           name: projectPayload.project.name,
@@ -115,13 +172,8 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
           updatedAt: projectPayload.project.updated_at,
           autosaveStatus: 'ready',
           prompt: projectPayload.project.last_prompt ?? '',
-          results: projectPayload.generations.map((generation) => ({
-            id: generation.id,
-            imageUrl: `${API_BASE_URL}/generations/${generation.id}/image`,
-            description: generation.description,
-            createdAt: generation.created_at,
-            source: 'api',
-          })),
+          slideImage,
+          results,
           generationStatus: 'idle',
           generationError: null,
           pendingSlots: 0,
@@ -224,16 +276,17 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
 
   const renameProject = useCallback(
     async (name: string) => {
-      const ownerId = getOwnerId();
       const authToken = getAuthToken();
+      if (!authToken) {
+        throw new Error('Authentication required.');
+      }
       const response = await fetch(`${API_BASE_URL}/projects/${project.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
-          owner_id: ownerId,
           name,
           prompt: project.prompt ?? '',
           slide_context: project.prompt ?? '',

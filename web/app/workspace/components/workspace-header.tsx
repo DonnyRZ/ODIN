@@ -8,7 +8,6 @@ import {
   clearActiveProjectId,
   clearWorkspaceProject,
   getAuthToken,
-  getOwnerId,
 } from '@/lib/workspace-storage';
 
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
@@ -31,13 +30,15 @@ export function WorkspaceHeader() {
     setDeleteError(null);
     setIsDeleting(true);
     try {
-      const ownerId = getOwnerId();
       const authToken = getAuthToken();
+      if (!authToken) {
+        throw new Error('Authentication required.');
+      }
       const response = await fetch(
-        `${API_BASE_URL}/projects/${project.id}?owner_id=${encodeURIComponent(ownerId)}`,
+        `${API_BASE_URL}/projects/${project.id}`,
         {
           method: 'DELETE',
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+          headers: { Authorization: `Bearer ${authToken}` },
         },
       );
       if (!response.ok) {
@@ -71,18 +72,6 @@ export function WorkspaceHeader() {
           </div>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <button
-            type="button"
-            className="rounded-full border border-gray-200 px-4 py-2 font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-          >
-            Share
-          </button>
-          <button
-            type="button"
-            className="rounded-full border border-gray-200 px-4 py-2 font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-          >
-            Download
-          </button>
           <button
             type="button"
             className="rounded-full border border-gray-200 px-4 py-2 font-medium text-gray-700 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"

@@ -12,11 +12,17 @@ BASE_DIR = Path(__file__).resolve().parents[3]
 DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "odin.db"
 IMAGES_DIR = DATA_DIR / "images"
+SLIDES_DIR = DATA_DIR / "slides"
+
+
+def _hash_token(token: str) -> str:
+  return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def init_db() -> None:
   DATA_DIR.mkdir(parents=True, exist_ok=True)
   IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+  SLIDES_DIR.mkdir(parents=True, exist_ok=True)
   conn = sqlite3.connect(DB_PATH)
   try:
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -31,6 +37,7 @@ def init_db() -> None:
         updated_at TEXT NOT NULL,
         last_prompt TEXT,
         last_slide_context TEXT,
+        slide_image_path TEXT,
         UNIQUE(owner_id, name)
       )
       """
@@ -52,10 +59,25 @@ def init_db() -> None:
       """
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
-        google_sub TEXT NOT NULL UNIQUE,
         email TEXT NOT NULL UNIQUE,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
         name TEXT,
+        email_verified INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
+      )
+      """
+    )
+    conn.execute(
+      """
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
       """
     )
@@ -75,6 +97,10 @@ def init_db() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_generations_project_id ON generations(project_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_generations_created_at ON generations(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reset_tokens_user_id ON password_reset_tokens(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reset_tokens_expires_at ON password_reset_tokens(expires_at)")
     conn.commit()
   finally:
     conn.close()
@@ -95,33 +121,60 @@ def db_connection() -> Iterator[sqlite3.Connection]:
 def _rebuild_users_table(conn: sqlite3.Connection, user_columns: set[str]) -> None:
   conn.execute("PRAGMA foreign_keys=OFF;")
   conn.execute("ALTER TABLE users RENAME TO users_old")
+  should_copy_users = "email" in user_columns
+  if should_copy_users:
+    null_email_count = conn.execute(
+      "SELECT COUNT(*) FROM users_old WHERE email IS NULL OR email = ''"
+    ).fetchone()[0]
+    if null_email_count:
+      should_copy_users = False
   conn.execute(
     """
     CREATE TABLE users (
       id TEXT PRIMARY KEY,
-      google_sub TEXT UNIQUE,
-      email TEXT UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
       name TEXT,
-      username TEXT UNIQUE,
-      password_hash TEXT,
+      email_verified INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     )
     """
   )
-  google_sub_expr = "google_sub" if "google_sub" in user_columns else "NULL AS google_sub"
   email_expr = "email" if "email" in user_columns else "NULL AS email"
-  name_expr = "name" if "name" in user_columns else "NULL AS name"
   username_expr = "username" if "username" in user_columns else "NULL AS username"
   password_expr = "password_hash" if "password_hash" in user_columns else "NULL AS password_hash"
+  name_expr = "name" if "name" in user_columns else "NULL AS name"
+  verified_expr = "email_verified" if "email_verified" in user_columns else "0 AS email_verified"
   created_expr = "created_at" if "created_at" in user_columns else "'' AS created_at"
+  if should_copy_users:
+    conn.execute(
+      f"""
+      INSERT INTO users (id, email, username, password_hash, name, email_verified, created_at)
+      SELECT id, {email_expr}, {username_expr}, {password_expr}, {name_expr}, {verified_expr}, {created_expr}
+      FROM users_old
+      """
+    )
+  conn.execute("DROP TABLE users_old")
+
+  existing = conn.execute(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'password_reset_tokens'",
+  ).fetchone()
+  if existing:
+    conn.execute("DROP TABLE password_reset_tokens")
   conn.execute(
-    f"""
-    INSERT INTO users (id, google_sub, email, name, username, password_hash, created_at)
-    SELECT id, {google_sub_expr}, {email_expr}, {name_expr}, {username_expr}, {password_expr}, {created_expr}
-    FROM users_old
+    """
+    CREATE TABLE password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
     """
   )
-  conn.execute("DROP TABLE users_old")
 
   session_columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
   if session_columns:
@@ -138,13 +191,14 @@ def _rebuild_users_table(conn: sqlite3.Connection, user_columns: set[str]) -> No
       )
       """
     )
-    conn.execute(
-      """
-      INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at)
-      SELECT id, user_id, token_hash, created_at, expires_at
-      FROM sessions_old
-      """
-    )
+    if should_copy_users:
+      conn.execute(
+        """
+        INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at)
+        SELECT id, user_id, token_hash, created_at, expires_at
+        FROM sessions_old
+        """
+      )
     conn.execute("DROP TABLE sessions_old")
 
   conn.execute("PRAGMA foreign_keys=ON;")
@@ -184,25 +238,35 @@ def _maybe_migrate(conn: sqlite3.Connection) -> None:
   if "owner_id" not in columns:
     conn.execute("ALTER TABLE projects ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'")
     conn.execute("UPDATE projects SET owner_id = 'local' WHERE owner_id IS NULL")
+  if "slide_image_path" not in columns:
+    conn.execute("ALTER TABLE projects ADD COLUMN slide_image_path TEXT")
 
   user_info = list(conn.execute("PRAGMA table_info(users)"))
   user_columns = {row[1] for row in user_info}
   if user_columns:
-    requires_rebuild = False
-    for row in user_info:
-      if row[1] in {"google_sub", "email"} and row[3] == 1:
-        requires_rebuild = True
-        break
+    required_columns = {"id", "email", "username", "password_hash", "name", "email_verified", "created_at"}
+    deprecated_columns = {"google_sub"}
+    requires_rebuild = (
+      not required_columns.issubset(user_columns)
+      or bool(deprecated_columns.intersection(user_columns))
+    )
     if requires_rebuild:
       _rebuild_users_table(conn, user_columns)
-      user_columns = {"id", "google_sub", "email", "name", "username", "password_hash", "created_at"}
+      user_columns = required_columns
     fk_targets = {row[2] for row in conn.execute("PRAGMA foreign_key_list(sessions)")}
     if "users_old" in fk_targets:
       _rebuild_sessions_table(conn)
+    if "name" not in user_columns:
+      conn.execute("ALTER TABLE users ADD COLUMN name TEXT")
+    if "email" not in user_columns:
+      conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     if "username" not in user_columns:
       conn.execute("ALTER TABLE users ADD COLUMN username TEXT")
     if "password_hash" not in user_columns:
       conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+    if "email_verified" not in user_columns:
+      conn.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)")
 
 
@@ -250,6 +314,13 @@ def save_generated_image(image_bytes: bytes, image_id: Optional[str] = None) -> 
   return str(relative_path)
 
 
+def save_slide_image(image_bytes: bytes, project_id: str) -> str:
+  relative_path = Path("slides") / f"{project_id}.png"
+  full_path = DATA_DIR / relative_path
+  full_path.write_bytes(image_bytes)
+  return str(relative_path)
+
+
 def insert_generation(
   conn: sqlite3.Connection,
   *,
@@ -269,34 +340,10 @@ def insert_generation(
   )
 
 
-def get_or_create_user(
-  conn: sqlite3.Connection,
-  *,
-  google_sub: str,
-  email: str,
-  name: str,
-  created_at: str,
-) -> str:
-  existing = conn.execute("SELECT id FROM users WHERE google_sub = ?", (google_sub,)).fetchone()
-  if existing:
-    conn.execute("UPDATE users SET email = ?, name = ? WHERE id = ?", (email, name, existing["id"]))
-    return str(existing["id"])
-
-  user_id = str(uuid4())
-  conn.execute(
-    """
-    INSERT INTO users (id, google_sub, email, name, created_at)
-    VALUES (?, ?, ?, ?, ?)
-    """,
-    (user_id, google_sub, email, name, created_at),
-  )
-  return user_id
-
-
 def get_user_by_username(conn: sqlite3.Connection, username: str) -> Optional[dict]:
   row = conn.execute(
     """
-    SELECT id, username, password_hash FROM users
+    SELECT id, email, username, password_hash, email_verified FROM users
     WHERE username = ?
     """,
     (username,),
@@ -304,27 +351,54 @@ def get_user_by_username(conn: sqlite3.Connection, username: str) -> Optional[di
   return dict(row) if row else None
 
 
+def get_user_by_email(conn: sqlite3.Connection, email: str) -> Optional[dict]:
+  row = conn.execute(
+    """
+    SELECT id, email, username, password_hash, email_verified FROM users
+    WHERE email = ?
+    """,
+    (email,),
+  ).fetchone()
+  return dict(row) if row else None
+
+
 def create_user_with_password(
   conn: sqlite3.Connection,
   *,
+  email: str,
   username: str,
   password_hash: str,
+  name: str,
   created_at: str,
 ) -> str:
   user_id = str(uuid4())
   conn.execute(
     """
-    INSERT INTO users (id, username, password_hash, created_at)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO users (id, email, username, password_hash, name, email_verified, created_at)
+    VALUES (?, ?, ?, ?, ?, 1, ?)
     """,
-    (user_id, username, password_hash, created_at),
+    (user_id, email, username, password_hash, name, created_at),
   )
   return user_id
 
 
+def update_user_password(conn: sqlite3.Connection, user_id: str, password_hash: str) -> None:
+  conn.execute(
+    "UPDATE users SET password_hash = ? WHERE id = ?",
+    (password_hash, user_id),
+  )
+
+
+def delete_user(conn: sqlite3.Connection, user_id: str) -> None:
+  conn.execute(
+    "DELETE FROM users WHERE id = ?",
+    (user_id,),
+  )
+
+
 def create_session(conn: sqlite3.Connection, *, user_id: str, created_at: str, expires_at: str) -> str:
   raw = secrets.token_urlsafe(32)
-  token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+  token_hash = _hash_token(raw)
   session_id = str(uuid4())
   conn.execute(
     """
@@ -337,7 +411,7 @@ def create_session(conn: sqlite3.Connection, *, user_id: str, created_at: str, e
 
 
 def get_user_id_for_token(conn: sqlite3.Connection, token: str, now: str) -> Optional[str]:
-  token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+  token_hash = _hash_token(token)
   row = conn.execute(
     """
     SELECT user_id FROM sessions
@@ -346,6 +420,44 @@ def get_user_id_for_token(conn: sqlite3.Connection, token: str, now: str) -> Opt
     (token_hash, now),
   ).fetchone()
   return str(row["user_id"]) if row else None
+
+
+def create_password_reset_token(
+  conn: sqlite3.Connection,
+  *,
+  user_id: str,
+  created_at: str,
+  expires_at: str,
+) -> str:
+  raw = secrets.token_urlsafe(32)
+  token_hash = _hash_token(raw)
+  token_id = str(uuid4())
+  conn.execute(
+    """
+    INSERT INTO password_reset_tokens (id, user_id, token_hash, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?)
+    """,
+    (token_id, user_id, token_hash, created_at, expires_at),
+  )
+  return raw
+
+
+def consume_password_reset_token(conn: sqlite3.Connection, *, token: str, now: str) -> Optional[str]:
+  token_hash = _hash_token(token)
+  row = conn.execute(
+    """
+    SELECT id, user_id FROM password_reset_tokens
+    WHERE token_hash = ? AND expires_at > ? AND used_at IS NULL
+    """,
+    (token_hash, now),
+  ).fetchone()
+  if not row:
+    return None
+  conn.execute(
+    "UPDATE password_reset_tokens SET used_at = ? WHERE id = ?",
+    (now, row["id"]),
+  )
+  return str(row["user_id"])
 
 
 def update_project_name(
@@ -365,6 +477,25 @@ def update_project_name(
     WHERE owner_id = ? AND id = ?
     """,
     (name, updated_at, prompt, slide_context, owner_id, project_id),
+  )
+  return cursor.rowcount > 0
+
+
+def update_project_slide_image(
+  conn: sqlite3.Connection,
+  *,
+  owner_id: str,
+  project_id: str,
+  slide_image_path: Optional[str],
+  updated_at: str,
+) -> bool:
+  cursor = conn.execute(
+    """
+    UPDATE projects
+    SET slide_image_path = ?, updated_at = ?
+    WHERE owner_id = ? AND id = ?
+    """,
+    (slide_image_path, updated_at, owner_id, project_id),
   )
   return cursor.rowcount > 0
 
@@ -394,13 +525,32 @@ def list_projects(conn: sqlite3.Connection, owner_id: str) -> list[dict]:
 def get_project(conn: sqlite3.Connection, owner_id: str, project_id: str) -> Optional[dict]:
   row = conn.execute(
     """
-    SELECT id, name, created_at, updated_at, last_prompt, last_slide_context
+    SELECT id, name, created_at, updated_at, last_prompt, last_slide_context, slide_image_path
     FROM projects
     WHERE owner_id = ? AND id = ?
     """,
     (owner_id, project_id),
   ).fetchone()
   return dict(row) if row else None
+
+
+def get_project_slide_image_path(
+  conn: sqlite3.Connection,
+  *,
+  owner_id: str,
+  project_id: str,
+) -> Optional[str]:
+  row = conn.execute(
+    """
+    SELECT slide_image_path
+    FROM projects
+    WHERE owner_id = ? AND id = ?
+    """,
+    (owner_id, project_id),
+  ).fetchone()
+  if not row:
+    return None
+  return str(row["slide_image_path"]) if row["slide_image_path"] else None
 
 
 def list_generations(conn: sqlite3.Connection, project_id: str) -> list[dict]:
@@ -432,6 +582,24 @@ def get_generation_image_path(conn: sqlite3.Connection, generation_id: str) -> O
   row = conn.execute(
     "SELECT image_path FROM generations WHERE id = ?",
     (generation_id,),
+  ).fetchone()
+  return str(row["image_path"]) if row else None
+
+
+def get_generation_image_path_for_user(
+  conn: sqlite3.Connection,
+  *,
+  generation_id: str,
+  owner_id: str,
+) -> Optional[str]:
+  row = conn.execute(
+    """
+    SELECT generations.image_path
+    FROM generations
+    JOIN projects ON projects.id = generations.project_id
+    WHERE generations.id = ? AND projects.owner_id = ?
+    """,
+    (generation_id, owner_id),
   ).fetchone()
   return str(row["image_path"]) if row else None
 

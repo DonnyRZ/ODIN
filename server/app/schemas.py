@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 class GenerateRequest(BaseModel):
   project_name: str = Field(..., max_length=120)
-  owner_id: Optional[str] = Field(None, description="Client owner/device identifier")
   prompt: Optional[str] = Field(None, description="Slide text or bullet points")
   slide_context: Optional[str] = Field(None, description="Extracted text or notes from the slide")
   slide_image_base64: Optional[str] = Field(None, description="Full slide screenshot encoded as base64 data URL")

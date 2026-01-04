@@ -22,8 +22,15 @@ class Settings(BaseSettings):
   image_model: str = Field("gemini-3-pro-image-preview", env="IMAGE_GEN")
   creativity_default: float = Field(0.5, ge=0.0, le=1.0)
   max_variants: int = Field(3, ge=1, le=6)
-  google_client_id: str = Field("", env="GOOGLE_CLIENT_ID")
-  google_client_secret: str = Field("", env="GOOGLE_CLIENT_SECRET")
+  frontend_base_url: str = Field("http://localhost:3000", env="FRONTEND_BASE_URL")
+  smtp_host: str = Field("", env="SMTP_HOST")
+  smtp_port: int = Field(587, env="SMTP_PORT")
+  smtp_user: str = Field("", env="SMTP_USER")
+  smtp_password: str = Field("", env="SMTP_PASSWORD")
+  smtp_from: str = Field("", env="SMTP_FROM")
+  smtp_use_tls: bool = Field(False, env="SMTP_USE_TLS")
+  smtp_use_starttls: bool = Field(True, env="SMTP_USE_STARTTLS")
+  reset_token_hours: int = Field(2, ge=1, le=24, env="RESET_TOKEN_HOURS")
 
 
 @lru_cache(maxsize=1)

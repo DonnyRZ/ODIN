@@ -28,6 +28,12 @@ build/
 outputs/
 server/data/
 client_secret_*.json
+data/
+backups/
+web/out/
+web/out.tar.gz
+out.tar.gz
+temp.bin
 
 # Test directories
 ai-tests/

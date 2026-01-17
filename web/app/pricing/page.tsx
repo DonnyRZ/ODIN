@@ -32,6 +32,7 @@ function PricingPageContent() {
 
   const nextParam = searchParams.get('next');
   const nextRedirect = nextParam && nextParam.startsWith('/') ? nextParam : null;
+  const loginHref = nextRedirect ? `/login?next=${encodeURIComponent(nextRedirect)}` : '/login';
 
   useEffect(() => {
     const token = getAuthToken();
@@ -191,7 +192,7 @@ function PricingPageContent() {
                 </button>
               </>
             ) : (
-              <Link className="nav-link" href="/login">
+              <Link className="nav-link" href={loginHref as Route}>
                 Login
               </Link>
             )}

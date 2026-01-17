@@ -82,6 +82,13 @@ const plans: Plan[] = [
 const formatIdr = (value: number) => `Rp${value.toLocaleString('id-ID')}`;
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
 
+const createIdempotencyKey = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 function CheckoutPageContent() {
   const midtransClientKey = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ?? '';
   const snapScriptUrl = 'https://app.sandbox.midtrans.com/snap/snap.js';
@@ -107,6 +114,19 @@ function CheckoutPageContent() {
     () => plans.find((plan) => plan.id === selectedPlanId) ?? plans[1],
     [selectedPlanId],
   );
+  const idempotencyKey = useMemo(() => {
+    if (typeof window === 'undefined' || !window.sessionStorage) {
+      return '';
+    }
+    const storageKey = `odin.checkout.idempotency.${selectedPlanId}`;
+    const existing = window.sessionStorage.getItem(storageKey);
+    if (existing) {
+      return existing;
+    }
+    const generated = createIdempotencyKey();
+    window.sessionStorage.setItem(storageKey, generated);
+    return generated;
+  }, [selectedPlanId]);
   const checkoutPath = useMemo(() => {
     if (planParam && plans.some((plan) => plan.id === planParam)) {
       return `/checkout?plan=${planParam}`;
@@ -171,6 +191,10 @@ function CheckoutPageContent() {
     if (!snapReady) {
       setSnapReady(true);
     }
+    if (!idempotencyKey) {
+      setFormError('Gagal menyiapkan pembayaran. Silakan muat ulang halaman.');
+      return;
+    }
 
     setIsSubmitting(true);
     setFormError(null);
@@ -181,6 +205,7 @@ function CheckoutPageContent() {
       email: resolvedEmail,
       phone: phone.trim(),
       company: company.trim() || undefined,
+      idempotency_key: idempotencyKey,
     };
 
     try {

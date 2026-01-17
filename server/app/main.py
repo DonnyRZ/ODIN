@@ -9,6 +9,7 @@ import logging
 import sqlite3
 import requests
 from collections import defaultdict, deque
+from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,9 +23,14 @@ from .core.db import (
   create_session,
   create_password_reset_token,
   db_connection,
+  create_subscription_period,
+  claim_payment_order_for_token,
   get_generation_image_path_for_user,
   get_user_by_email,
   get_user_by_username,
+  get_latest_payment_event,
+  get_payment_order_by_idempotency_key,
+  get_latest_active_subscription_period,
   get_or_create_project,
   get_project,
   get_project_slide_image_path,
@@ -33,6 +39,7 @@ from .core.db import (
   insert_generation,
   list_generation_image_paths,
   list_generations,
+  list_subscription_periods_for_user,
   list_projects,
   delete_project,
   consume_password_reset_token,
@@ -43,9 +50,14 @@ from .core.db import (
   update_project_slide_image,
   create_payment_order,
   get_payment_order,
+  get_subscription_period_by_order_id,
+  update_payment_order_processing_status,
   update_payment_order_status,
+  update_payment_order_token,
+  update_subscription_period_status,
   get_subscription,
   upsert_subscription,
+  insert_payment_event,
 )
 from .schemas import (
   GenerateRequest,
@@ -198,9 +210,35 @@ def _midtrans_snap_base_url(settings) -> str:
   return "https://app.sandbox.midtrans.com"
 
 
+def _midtrans_api_base_url(settings) -> str:
+  if _midtrans_is_production(settings):
+    return "https://api.midtrans.com"
+  return "https://api.sandbox.midtrans.com"
+
+
 def _midtrans_auth_header(server_key: str) -> str:
   raw = f"{server_key}:".encode("ascii")
   return base64.b64encode(raw).decode("ascii")
+
+
+def _fetch_midtrans_status(settings, order_id: str) -> tuple[str, Optional[dict]]:
+  url = f"{_midtrans_api_base_url(settings)}/v2/{order_id}/status"
+  headers = {
+    "Accept": "application/json",
+    "Authorization": f"Basic {_midtrans_auth_header(settings.midtrans_server_key)}",
+  }
+  try:
+    response = requests.get(url, headers=headers, timeout=20)
+  except requests.RequestException:
+    return ("error", None)
+  if response.status_code == 404:
+    return ("not_found", None)
+  if response.status_code != 200:
+    return ("error", {"status_code": response.status_code, "body": response.text})
+  try:
+    return ("ok", response.json())
+  except ValueError:
+    return ("error", {"status_code": response.status_code, "body": response.text})
 
 
 def _midtrans_signature(
@@ -238,6 +276,83 @@ def _map_subscription_status(payment_status: str) -> str:
   if payment_status in ("FAILED", "REFUNDED"):
     return "canceled"
   return "pending"
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+  if not value:
+    return None
+  try:
+    return datetime.fromisoformat(value.replace("Z", ""))
+  except ValueError:
+    return None
+
+
+def _next_billing_period(current_period_end: str | None, now: datetime) -> tuple[str, str]:
+  current_end = _parse_iso_datetime(current_period_end)
+  if current_end and current_end > now:
+    period_start = current_end
+  else:
+    period_start = now
+  period_end = period_start + timedelta(days=30)
+  return (
+    period_start.isoformat() + "Z",
+    period_end.isoformat() + "Z",
+  )
+
+
+def _select_subscription_snapshot(periods: list[dict], now: datetime) -> Optional[dict]:
+  def period_end_dt(period: dict) -> datetime:
+    parsed = _parse_iso_datetime(period.get("period_end"))
+    return parsed if parsed else datetime.min
+
+  active_candidates = [
+    period
+    for period in periods
+    if period.get("status") == "active" and period_end_dt(period) > now
+  ]
+  if active_candidates:
+    selected = max(active_candidates, key=period_end_dt)
+    status = "active"
+  else:
+    if not periods:
+      return None
+    selected = max(periods, key=period_end_dt)
+    status = "canceled"
+
+  selected_end = period_end_dt(selected)
+  if selected_end == datetime.min:
+    current_period_end = None
+  elif status == "active":
+    current_period_end = selected_end
+  else:
+    current_period_end = min(selected_end, now)
+
+  return {
+    "status": status,
+    "plan_id": selected.get("plan_id") or "unknown",
+    "order_id": selected.get("order_id"),
+    "started_at": selected.get("period_start"),
+    "current_period_end": current_period_end.isoformat() + "Z" if current_period_end else None,
+  }
+
+
+def _refresh_subscription_snapshot(conn, user_id: str, now: datetime) -> None:
+  periods = list_subscription_periods_for_user(conn, user_id=user_id)
+  snapshot = _select_subscription_snapshot(periods, now)
+  if not snapshot:
+    return
+  now_iso = now.isoformat() + "Z"
+  upsert_subscription(
+    conn,
+    user_id=user_id,
+    plan_id=snapshot["plan_id"],
+    status=snapshot["status"],
+    order_id=snapshot["order_id"],
+    started_at=snapshot["started_at"],
+    current_period_end=snapshot["current_period_end"],
+    created_at=now_iso,
+    updated_at=now_iso,
+  )
 
 
 def _decode_image_data(data_url: str) -> bytes:
@@ -287,6 +402,9 @@ async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) 
   name = payload.name.strip()
   email = payload.email.strip()
   phone = payload.phone.strip()
+  idempotency_key = payload.idempotency_key.strip()
+  if not idempotency_key:
+    raise HTTPException(status_code=400, detail="Idempotency key required.")
   if not name:
     raise HTTPException(status_code=400, detail="Name required.")
   if not _is_valid_email(email):
@@ -298,16 +416,176 @@ async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) 
   if not plan:
     raise HTTPException(status_code=400, detail="Plan not found.")
 
-  order_id = _generate_order_id(plan.id)
-  first_name, last_name = _split_name(name)
+  now_dt = datetime.utcnow()
+  now = now_dt.isoformat() + "Z"
+  order_id = None
+  customer_name = name
+  customer_email = email
+  customer_phone = phone
+  status_check_order_id: Optional[str] = None
+  status_check_existing: Optional[dict] = None
+  processing_timeout_seconds = 120
+
+  with db_connection() as conn:
+    existing = get_payment_order_by_idempotency_key(
+      conn,
+      user_id=user_id,
+      idempotency_key=idempotency_key,
+    )
+    if existing:
+      order_id = str(existing["order_id"])
+      if existing.get("plan_id") != plan.id:
+        raise HTTPException(
+          status_code=409,
+          detail="Idempotency key already used for different plan.",
+        )
+      if existing.get("status") in ("PAID", "REFUNDED"):
+        raise HTTPException(status_code=409, detail="Payment already completed.")
+      existing_token = existing.get("snap_token")
+      if existing_token:
+        return PaymentTokenResponse(
+          order_id=existing["order_id"],
+          token=existing_token,
+          redirect_url=None,
+        )
+      event = get_latest_payment_event(conn, order_id=order_id, event_type="token_success")
+      if event:
+        try:
+          event_payload = json.loads(event.get("payload_json") or "{}")
+        except ValueError:
+          event_payload = {}
+        recovered_token = event_payload.get("token")
+        if recovered_token:
+          updated = update_payment_order_token(
+            conn,
+            order_id=order_id,
+            snap_token=recovered_token,
+            updated_at=now,
+            status="CREATED",
+          )
+          if updated:
+            return PaymentTokenResponse(
+              order_id=order_id,
+              token=recovered_token,
+              redirect_url=event_payload.get("redirect_url"),
+            )
+          latest = get_payment_order(conn, order_id)
+          if latest and latest.get("snap_token"):
+            return PaymentTokenResponse(
+              order_id=order_id,
+              token=latest["snap_token"],
+              redirect_url=None,
+            )
+      if existing.get("status") == "FAILED":
+        claimed = claim_payment_order_for_token(
+          conn,
+          order_id=order_id,
+          allowed_statuses=("FAILED",),
+          updated_at=now,
+        )
+        if not claimed:
+          raise HTTPException(
+            status_code=409,
+            detail="Payment sedang diproses. Coba lagi sebentar.",
+          )
+        customer_name = str(existing.get("customer_name") or name)
+        customer_email = str(existing.get("customer_email") or email)
+        customer_phone = str(existing.get("customer_phone") or phone)
+      else:
+        updated_at = _parse_iso_datetime(existing.get("updated_at"))
+        if updated_at and (now_dt - updated_at).total_seconds() > processing_timeout_seconds:
+          status_check_order_id = order_id
+          status_check_existing = existing
+        else:
+          raise HTTPException(
+            status_code=409,
+            detail="Payment sedang diproses. Coba lagi sebentar.",
+          )
+    else:
+      order_id = _generate_order_id(plan.id)
+      while get_payment_order(conn, order_id):
+        order_id = _generate_order_id(plan.id)
+      create_payment_order(
+        conn,
+        order_id=order_id,
+        user_id=user_id,
+        idempotency_key=idempotency_key,
+        plan_id=plan.id,
+        gross_amount=plan.price_idr,
+        currency="IDR",
+        customer_name=name,
+        customer_email=email,
+        customer_phone=phone,
+        status="CREATING",
+        created_at=now,
+        updated_at=now,
+      )
+
+  if not order_id:
+    raise HTTPException(status_code=500, detail="Failed to initialize payment order.")
+
+  if status_check_order_id:
+    status_state, status_payload = _fetch_midtrans_status(settings, status_check_order_id)
+    now = datetime.utcnow().isoformat() + "Z"
+    if status_state == "ok" and status_payload:
+      transaction_status = status_payload.get("transaction_status")
+      fraud_status = status_payload.get("fraud_status")
+      status_code = status_payload.get("status_code")
+      internal_status = _map_midtrans_status(transaction_status, fraud_status)
+      notification_json = json.dumps(status_payload, separators=(",", ":"), ensure_ascii=True)
+      paid_at = status_check_existing.get("paid_at") if status_check_existing else None
+      if internal_status == "PAID" and not paid_at:
+        paid_at = now
+      with db_connection() as conn:
+        insert_payment_event(
+          conn,
+          event_id=str(uuid4()),
+          order_id=str(status_check_order_id),
+          event_type="status_check",
+          payload_json=notification_json,
+          received_at=now,
+        )
+        update_payment_order_status(
+          conn,
+          order_id=str(status_check_order_id),
+          status=internal_status,
+          transaction_status=transaction_status,
+          fraud_status=fraud_status,
+          status_code=str(status_code) if status_code is not None else None,
+          last_notification_json=notification_json,
+          paid_at=paid_at,
+          updated_at=now,
+        )
+      raise HTTPException(
+        status_code=409,
+        detail="Payment sudah dibuat. Silakan cek status pembayaran.",
+      )
+    if status_state == "not_found":
+      with db_connection() as conn:
+        update_payment_order_processing_status(
+          conn,
+          order_id=str(status_check_order_id),
+          status="FAILED",
+          updated_at=now,
+        )
+      raise HTTPException(
+        status_code=409,
+        detail="Payment sebelumnya gagal diproses. Silakan coba lagi.",
+      )
+    raise HTTPException(
+      status_code=409,
+      detail="Payment sedang diproses. Coba lagi sebentar.",
+    )
+
+  first_name, last_name = _split_name(customer_name)
   request_payload = {
     "transaction_details": {"order_id": order_id, "gross_amount": plan.price_idr},
     "credit_card": {"secure": True},
     "customer_details": {
       "first_name": first_name,
       "last_name": last_name,
-      "email": email,
-      "phone": phone,
+      "email": customer_email,
+      "phone": customer_phone,
     },
     "item_details": [
       {
@@ -327,12 +605,30 @@ async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) 
   try:
     response = requests.post(snap_url, headers=headers, json=request_payload, timeout=20)
   except requests.RequestException as exc:
+    now = datetime.utcnow().isoformat() + "Z"
+    with db_connection() as conn:
+      update_payment_order_processing_status(
+        conn,
+        order_id=order_id,
+        status="FAILED",
+        updated_at=now,
+      )
+      insert_payment_event(
+        conn,
+        event_id=str(uuid4()),
+        order_id=str(order_id),
+        event_type="token_failed",
+        payload_json=json.dumps({"error": str(exc)}, separators=(",", ":"), ensure_ascii=True),
+        received_at=now,
+      )
     raise HTTPException(status_code=502, detail="Failed to reach Midtrans.") from exc
 
   if response.status_code != 201:
     detail = "Midtrans token request failed."
+    error_payload = {"status_code": response.status_code, "body": response.text}
     try:
       body = response.json()
+      error_payload = body
       error_messages = body.get("error_messages")
       if isinstance(error_messages, list):
         detail = "; ".join(error_messages)
@@ -342,6 +638,22 @@ async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) 
         detail = str(body["message"])
     except ValueError:
       detail = f"{detail} ({response.text})"
+    now = datetime.utcnow().isoformat() + "Z"
+    with db_connection() as conn:
+      update_payment_order_processing_status(
+        conn,
+        order_id=order_id,
+        status="FAILED",
+        updated_at=now,
+      )
+      insert_payment_event(
+        conn,
+        event_id=str(uuid4()),
+        order_id=str(order_id),
+        event_type="token_failed",
+        payload_json=json.dumps(error_payload, separators=(",", ":"), ensure_ascii=True),
+        received_at=now,
+      )
     raise HTTPException(status_code=502, detail=detail)
 
   data = response.json()
@@ -350,35 +662,33 @@ async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) 
     raise HTTPException(status_code=502, detail="Midtrans response missing token.")
 
   now = datetime.utcnow().isoformat() + "Z"
+  token_payload = {"token": token, "redirect_url": data.get("redirect_url")}
   with db_connection() as conn:
-    if get_payment_order(conn, order_id):
-      order_id = _generate_order_id(plan.id)
-    create_payment_order(
+    insert_payment_event(
+      conn,
+      event_id=str(uuid4()),
+      order_id=str(order_id),
+      event_type="token_success",
+      payload_json=json.dumps(token_payload, separators=(",", ":"), ensure_ascii=True),
+      received_at=now,
+    )
+  with db_connection() as conn:
+    updated = update_payment_order_token(
       conn,
       order_id=order_id,
-      user_id=user_id,
-      plan_id=plan.id,
-      gross_amount=plan.price_idr,
-      currency="IDR",
-      customer_name=name,
-      customer_email=email,
-      customer_phone=phone,
-      status="CREATED",
-      created_at=now,
-      updated_at=now,
       snap_token=token,
-    )
-    upsert_subscription(
-      conn,
-      user_id=user_id,
-      plan_id=plan.id,
-      status="pending",
-      order_id=order_id,
-      started_at=None,
-      current_period_end=None,
-      created_at=now,
       updated_at=now,
+      status="CREATED",
     )
+    if not updated:
+      existing = get_payment_order(conn, order_id)
+      if existing and existing.get("snap_token"):
+        return PaymentTokenResponse(
+          order_id=order_id,
+          token=existing["snap_token"],
+          redirect_url=None,
+        )
+      raise HTTPException(status_code=409, detail="Payment already created.")
 
   return PaymentTokenResponse(
     order_id=order_id,
@@ -417,55 +727,115 @@ async def midtrans_notification(request: Request):
   fraud_status = payload.get("fraud_status")
   internal_status = _map_midtrans_status(transaction_status, fraud_status)
   notification_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
-  now = datetime.utcnow().isoformat() + "Z"
+  now_dt = datetime.utcnow()
+  now = now_dt.isoformat() + "Z"
 
   with db_connection() as conn:
+    insert_payment_event(
+      conn,
+      event_id=str(uuid4()),
+      order_id=str(order_id),
+      event_type=f"notification:{internal_status.lower()}",
+      payload_json=notification_json,
+      received_at=now,
+    )
+
     order = get_payment_order(conn, str(order_id))
-    if order:
-      update_payment_order_status(
-        conn,
-        order_id=str(order_id),
-        status=internal_status,
-        transaction_status=transaction_status,
-        fraud_status=fraud_status,
-        status_code=str(status_code),
-        last_notification_json=notification_json,
-        updated_at=now,
-      )
-    else:
-      create_payment_order(
-        conn,
-        order_id=str(order_id),
-        plan_id="unknown",
-        gross_amount=_parse_amount(gross_amount),
-        currency="IDR",
-        customer_name="",
-        customer_email="",
-        customer_phone="",
-        status=internal_status,
-        created_at=now,
-        updated_at=now,
-        transaction_status=transaction_status,
-        fraud_status=fraud_status,
-        status_code=str(status_code),
-        last_notification_json=notification_json,
-      )
     if not order:
-      order = get_payment_order(conn, str(order_id))
+      insert_payment_event(
+        conn,
+        event_id=str(uuid4()),
+        order_id=str(order_id),
+        event_type="unknown_order",
+        payload_json=notification_json,
+        received_at=now,
+      )
+      return {"received": True}
+
+    expected_amount = int(order.get("gross_amount") or 0)
+    incoming_amount = _parse_amount(gross_amount)
+    if incoming_amount and expected_amount and incoming_amount != expected_amount:
+      insert_payment_event(
+        conn,
+        event_id=str(uuid4()),
+        order_id=str(order_id),
+        event_type="amount_mismatch",
+        payload_json=notification_json,
+        received_at=now,
+      )
+
+    paid_at = order.get("paid_at")
+    if internal_status == "PAID" and not paid_at:
+      paid_at = now
+
+    update_payment_order_status(
+      conn,
+      order_id=str(order_id),
+      status=internal_status,
+      transaction_status=transaction_status,
+      fraud_status=fraud_status,
+      status_code=str(status_code),
+      last_notification_json=notification_json,
+      paid_at=paid_at,
+      updated_at=now,
+    )
+
     if order and order.get("user_id"):
       subscription_status = _map_subscription_status(internal_status)
-      started_at = now if subscription_status == "active" else None
-      upsert_subscription(
-        conn,
-        user_id=str(order["user_id"]),
-        plan_id=order.get("plan_id") or "unknown",
-        status=subscription_status,
-        order_id=str(order_id),
-        started_at=started_at,
-        current_period_end=None,
-        created_at=now,
-        updated_at=now,
-      )
+      user_id = str(order["user_id"])
+      if subscription_status == "active":
+        existing_period = get_subscription_period_by_order_id(conn, order_id=str(order_id))
+        if existing_period:
+          if existing_period.get("status") != "active":
+            update_subscription_period_status(
+              conn,
+              order_id=str(order_id),
+              status="active",
+              updated_at=now,
+            )
+        else:
+          latest_active = get_latest_active_subscription_period(conn, user_id=user_id)
+          started_at, current_period_end = _next_billing_period(
+            latest_active.get("period_end") if latest_active else None,
+            now_dt,
+          )
+          create_subscription_period(
+            conn,
+            period_id=str(uuid4()),
+            user_id=user_id,
+            order_id=str(order_id),
+            plan_id=order.get("plan_id") or "unknown",
+            status="active",
+            period_start=started_at,
+            period_end=current_period_end,
+            created_at=now,
+            updated_at=now,
+          )
+        _refresh_subscription_snapshot(conn, user_id, now_dt)
+      elif subscription_status == "canceled":
+        existing_period = get_subscription_period_by_order_id(conn, order_id=str(order_id))
+        if existing_period:
+          update_subscription_period_status(
+            conn,
+            order_id=str(order_id),
+            status="canceled",
+            updated_at=now,
+          )
+          _refresh_subscription_snapshot(conn, user_id, now_dt)
+        else:
+          subscription = get_subscription(conn, user_id)
+          if subscription and subscription.get("order_id") == str(order_id):
+            upsert_subscription(
+              conn,
+              user_id=user_id,
+              plan_id=order.get("plan_id") or "unknown",
+              status="canceled",
+              order_id=str(order_id),
+              started_at=subscription.get("started_at"),
+              current_period_end=now,
+              created_at=now,
+              updated_at=now,
+            )
 
   return {"received": True}
 
@@ -485,6 +855,7 @@ async def midtrans_status(request: Request, order_id: str) -> PaymentStatusRespo
     status_code=order.get("status_code"),
     gross_amount=order.get("gross_amount"),
     currency=order.get("currency"),
+    paid_at=order.get("paid_at"),
     updated_at=order.get("updated_at"),
   )
 

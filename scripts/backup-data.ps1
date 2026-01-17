@@ -10,6 +10,8 @@ New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 
 $items = @(
   "odin.db",
+  "odin.db-wal",
+  "odin.db-shm",
   "images",
   "slides"
 )

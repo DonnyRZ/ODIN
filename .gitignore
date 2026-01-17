@@ -33,7 +33,11 @@ backups/
 web/out/
 web/out.tar.gz
 out.tar.gz
+server.tar.gz
+web/server.tar.gz
+*.tar.gz
 temp.bin
+output-*.txt
 
 # Test directories
 ai-tests/

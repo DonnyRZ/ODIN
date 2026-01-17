@@ -26,6 +26,7 @@ def init_db() -> None:
   conn = sqlite3.connect(DB_PATH)
   try:
     conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute(
       """
@@ -97,7 +98,8 @@ def init_db() -> None:
       """
       CREATE TABLE IF NOT EXISTS payment_orders (
         order_id TEXT PRIMARY KEY,
-        user_id TEXT,
+        user_id TEXT NOT NULL,
+        idempotency_key TEXT,
         plan_id TEXT NOT NULL,
         gross_amount INTEGER NOT NULL,
         currency TEXT NOT NULL,
@@ -111,7 +113,20 @@ def init_db() -> None:
         status_code TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        last_notification_json TEXT
+        paid_at TEXT,
+        last_notification_json TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+      """
+    )
+    conn.execute(
+      """
+      CREATE TABLE IF NOT EXISTS payment_events (
+        id TEXT PRIMARY KEY,
+        order_id TEXT,
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        received_at TEXT NOT NULL
       )
       """
     )
@@ -130,6 +145,22 @@ def init_db() -> None:
       )
       """
     )
+    conn.execute(
+      """
+      CREATE TABLE IF NOT EXISTS subscription_periods (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+      """
+    )
     _maybe_migrate(conn)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_generations_project_id ON generations(project_id)")
@@ -141,6 +172,19 @@ def init_db() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_orders_created_at ON payment_orders(created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders(user_id)")
+    conn.execute(
+      """
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_idempotency
+      ON payment_orders(user_id, idempotency_key)
+      WHERE idempotency_key IS NOT NULL
+      """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_events_order_id ON payment_events(order_id)")
+    conn.execute(
+      "CREATE INDEX IF NOT EXISTS idx_payment_events_order_received ON payment_events(order_id, received_at)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_subscription_periods_user_id ON subscription_periods(user_id)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_periods_order_id ON subscription_periods(order_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)")
     conn.commit()
   finally:
@@ -151,6 +195,7 @@ def init_db() -> None:
 def db_connection() -> Iterator[sqlite3.Connection]:
   conn = sqlite3.connect(DB_PATH)
   conn.row_factory = sqlite3.Row
+  conn.execute("PRAGMA busy_timeout=5000;")
   conn.execute("PRAGMA foreign_keys=ON;")
   try:
     yield conn
@@ -274,6 +319,75 @@ def _rebuild_sessions_table(conn: sqlite3.Connection) -> None:
   conn.execute("PRAGMA foreign_keys=ON;")
 
 
+def _rebuild_payment_orders_table(
+  conn: sqlite3.Connection,
+  payment_columns: set[str],
+  *,
+  enforce_user_not_null: bool,
+) -> None:
+  conn.execute("PRAGMA foreign_keys=OFF;")
+  conn.execute("ALTER TABLE payment_orders RENAME TO payment_orders_old")
+  user_id_column = "TEXT NOT NULL" if enforce_user_not_null else "TEXT"
+  conn.execute(
+    f"""
+    CREATE TABLE payment_orders (
+      order_id TEXT PRIMARY KEY,
+      user_id {user_id_column},
+      idempotency_key TEXT,
+      plan_id TEXT NOT NULL,
+      gross_amount INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      customer_email TEXT NOT NULL,
+      customer_phone TEXT NOT NULL,
+      status TEXT NOT NULL,
+      snap_token TEXT,
+      transaction_status TEXT,
+      fraud_status TEXT,
+      status_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      paid_at TEXT,
+      last_notification_json TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+    """
+  )
+  columns = [
+    "order_id",
+    "user_id",
+    "idempotency_key",
+    "plan_id",
+    "gross_amount",
+    "currency",
+    "customer_name",
+    "customer_email",
+    "customer_phone",
+    "status",
+    "snap_token",
+    "transaction_status",
+    "fraud_status",
+    "status_code",
+    "created_at",
+    "updated_at",
+    "paid_at",
+    "last_notification_json",
+  ]
+  select_exprs = [
+    column if column in payment_columns else f"NULL AS {column}"
+    for column in columns
+  ]
+  conn.execute(
+    f"""
+    INSERT INTO payment_orders ({", ".join(columns)})
+    SELECT {", ".join(select_exprs)}
+    FROM payment_orders_old
+    """
+  )
+  conn.execute("DROP TABLE payment_orders_old")
+  conn.execute("PRAGMA foreign_keys=ON;")
+
+
 def _maybe_migrate(conn: sqlite3.Connection) -> None:
   columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
   if "owner_id" not in columns:
@@ -310,9 +424,39 @@ def _maybe_migrate(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)")
 
-  payment_columns = {row[1] for row in conn.execute("PRAGMA table_info(payment_orders)")}
-  if payment_columns and "user_id" not in payment_columns:
-    conn.execute("ALTER TABLE payment_orders ADD COLUMN user_id TEXT")
+  payment_info = list(conn.execute("PRAGMA table_info(payment_orders)"))
+  payment_columns = {row[1]: row for row in payment_info}
+  if payment_columns:
+    payment_fks = list(conn.execute("PRAGMA foreign_key_list(payment_orders)"))
+    has_user_fk = any(row[2] == "users" and row[3] == "user_id" for row in payment_fks)
+    user_not_null = bool(payment_columns.get("user_id")) and payment_columns["user_id"][3] == 1
+    null_user_count = 0
+    if "user_id" in payment_columns:
+      null_user_count = conn.execute(
+        "SELECT COUNT(*) FROM payment_orders WHERE user_id IS NULL OR user_id = ''"
+      ).fetchone()[0]
+    enforce_user_not_null = "user_id" in payment_columns and null_user_count == 0
+    needs_rebuild = (not has_user_fk) or (enforce_user_not_null and not user_not_null)
+    if needs_rebuild:
+      _rebuild_payment_orders_table(
+        conn,
+        set(payment_columns),
+        enforce_user_not_null=enforce_user_not_null,
+      )
+      payment_columns = {row[1]: row for row in conn.execute("PRAGMA table_info(payment_orders)")}
+    if "user_id" not in payment_columns:
+      conn.execute("ALTER TABLE payment_orders ADD COLUMN user_id TEXT")
+    if "idempotency_key" not in payment_columns:
+      conn.execute("ALTER TABLE payment_orders ADD COLUMN idempotency_key TEXT")
+    if "paid_at" not in payment_columns:
+      conn.execute("ALTER TABLE payment_orders ADD COLUMN paid_at TEXT")
+  conn.execute(
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_idempotency
+    ON payment_orders(user_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL
+    """
+  )
 
 
 def get_or_create_project(
@@ -664,7 +808,8 @@ def create_payment_order(
   conn: sqlite3.Connection,
   *,
   order_id: str,
-  user_id: Optional[str] = None,
+  user_id: str,
+  idempotency_key: Optional[str] = None,
   plan_id: str,
   gross_amount: int,
   currency: str,
@@ -678,13 +823,17 @@ def create_payment_order(
   transaction_status: Optional[str] = None,
   fraud_status: Optional[str] = None,
   status_code: Optional[str] = None,
+  paid_at: Optional[str] = None,
   last_notification_json: Optional[str] = None,
 ) -> None:
+  if not user_id:
+    raise ValueError("user_id required")
   conn.execute(
     """
     INSERT INTO payment_orders (
       order_id,
       user_id,
+      idempotency_key,
       plan_id,
       gross_amount,
       currency,
@@ -698,13 +847,15 @@ def create_payment_order(
       status_code,
       created_at,
       updated_at,
+      paid_at,
       last_notification_json
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
     (
       order_id,
       user_id,
+      idempotency_key,
       plan_id,
       gross_amount,
       currency,
@@ -718,6 +869,7 @@ def create_payment_order(
       status_code,
       created_at,
       updated_at,
+      paid_at,
       last_notification_json,
     ),
   )
@@ -729,6 +881,7 @@ def get_payment_order(conn: sqlite3.Connection, order_id: str) -> Optional[dict]
     SELECT
       order_id,
       user_id,
+      idempotency_key,
       plan_id,
       gross_amount,
       currency,
@@ -742,11 +895,47 @@ def get_payment_order(conn: sqlite3.Connection, order_id: str) -> Optional[dict]
       status_code,
       created_at,
       updated_at,
+      paid_at,
       last_notification_json
     FROM payment_orders
     WHERE order_id = ?
     """,
     (order_id,),
+  ).fetchone()
+  return dict(row) if row else None
+
+
+def get_payment_order_by_idempotency_key(
+  conn: sqlite3.Connection,
+  *,
+  user_id: str,
+  idempotency_key: str,
+) -> Optional[dict]:
+  row = conn.execute(
+    """
+    SELECT
+      order_id,
+      user_id,
+      idempotency_key,
+      plan_id,
+      gross_amount,
+      currency,
+      customer_name,
+      customer_email,
+      customer_phone,
+      status,
+      snap_token,
+      transaction_status,
+      fraud_status,
+      status_code,
+      created_at,
+      updated_at,
+      paid_at,
+      last_notification_json
+    FROM payment_orders
+    WHERE user_id = ? AND idempotency_key = ?
+    """,
+    (user_id, idempotency_key),
   ).fetchone()
   return dict(row) if row else None
 
@@ -757,14 +946,64 @@ def update_payment_order_token(
   order_id: str,
   snap_token: str,
   updated_at: str,
+  status: Optional[str] = None,
+) -> bool:
+  if status is None:
+    cursor = conn.execute(
+      """
+      UPDATE payment_orders
+      SET snap_token = ?, updated_at = ?
+      WHERE order_id = ?
+      """,
+      (snap_token, updated_at, order_id),
+    )
+  else:
+    cursor = conn.execute(
+      """
+      UPDATE payment_orders
+      SET snap_token = ?, status = ?, updated_at = ?
+      WHERE order_id = ?
+      """,
+      (snap_token, status, updated_at, order_id),
+    )
+  return cursor.rowcount > 0
+
+
+def update_payment_order_processing_status(
+  conn: sqlite3.Connection,
+  *,
+  order_id: str,
+  status: str,
+  updated_at: str,
 ) -> bool:
   cursor = conn.execute(
     """
     UPDATE payment_orders
-    SET snap_token = ?, updated_at = ?
+    SET status = ?, updated_at = ?
     WHERE order_id = ?
     """,
-    (snap_token, updated_at, order_id),
+    (status, updated_at, order_id),
+  )
+  return cursor.rowcount > 0
+
+
+def claim_payment_order_for_token(
+  conn: sqlite3.Connection,
+  *,
+  order_id: str,
+  allowed_statuses: tuple[str, ...],
+  updated_at: str,
+) -> bool:
+  if not allowed_statuses:
+    return False
+  placeholders = ", ".join("?" for _ in allowed_statuses)
+  cursor = conn.execute(
+    f"""
+    UPDATE payment_orders
+    SET status = ?, updated_at = ?
+    WHERE order_id = ? AND status IN ({placeholders}) AND snap_token IS NULL
+    """,
+    ("CREATING", updated_at, order_id, *allowed_statuses),
   )
   return cursor.rowcount > 0
 
@@ -778,6 +1017,7 @@ def update_payment_order_status(
   fraud_status: Optional[str],
   status_code: Optional[str],
   last_notification_json: Optional[str],
+  paid_at: Optional[str],
   updated_at: str,
 ) -> bool:
   cursor = conn.execute(
@@ -789,7 +1029,8 @@ def update_payment_order_status(
       fraud_status = ?,
       status_code = ?,
       last_notification_json = ?,
-      updated_at = ?
+      updated_at = ?,
+      paid_at = ?
     WHERE order_id = ?
     """,
     (
@@ -799,10 +1040,197 @@ def update_payment_order_status(
       status_code,
       last_notification_json,
       updated_at,
+      paid_at,
       order_id,
     ),
   )
   return cursor.rowcount > 0
+
+
+def insert_payment_event(
+  conn: sqlite3.Connection,
+  *,
+  event_id: str,
+  order_id: Optional[str],
+  event_type: str,
+  payload_json: str,
+  received_at: str,
+) -> None:
+  conn.execute(
+    """
+    INSERT INTO payment_events (
+      id,
+      order_id,
+      event_type,
+      payload_json,
+      received_at
+    )
+    VALUES (?, ?, ?, ?, ?)
+    """,
+    (event_id, order_id, event_type, payload_json, received_at),
+  )
+
+
+def get_latest_payment_event(
+  conn: sqlite3.Connection,
+  *,
+  order_id: str,
+  event_type: str,
+) -> Optional[dict]:
+  row = conn.execute(
+    """
+    SELECT
+      id,
+      order_id,
+      event_type,
+      payload_json,
+      received_at
+    FROM payment_events
+    WHERE order_id = ? AND event_type = ?
+    ORDER BY received_at DESC
+    LIMIT 1
+    """,
+    (order_id, event_type),
+  ).fetchone()
+  return dict(row) if row else None
+
+
+def create_subscription_period(
+  conn: sqlite3.Connection,
+  *,
+  period_id: str,
+  user_id: str,
+  order_id: str,
+  plan_id: str,
+  status: str,
+  period_start: str,
+  period_end: str,
+  created_at: str,
+  updated_at: str,
+) -> None:
+  conn.execute(
+    """
+    INSERT INTO subscription_periods (
+      id,
+      user_id,
+      order_id,
+      plan_id,
+      status,
+      period_start,
+      period_end,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+    (
+      period_id,
+      user_id,
+      order_id,
+      plan_id,
+      status,
+      period_start,
+      period_end,
+      created_at,
+      updated_at,
+    ),
+  )
+
+
+def get_subscription_period_by_order_id(
+  conn: sqlite3.Connection,
+  *,
+  order_id: str,
+) -> Optional[dict]:
+  row = conn.execute(
+    """
+    SELECT
+      id,
+      user_id,
+      order_id,
+      plan_id,
+      status,
+      period_start,
+      period_end,
+      created_at,
+      updated_at
+    FROM subscription_periods
+    WHERE order_id = ?
+    """,
+    (order_id,),
+  ).fetchone()
+  return dict(row) if row else None
+
+
+def update_subscription_period_status(
+  conn: sqlite3.Connection,
+  *,
+  order_id: str,
+  status: str,
+  updated_at: str,
+) -> bool:
+  cursor = conn.execute(
+    """
+    UPDATE subscription_periods
+    SET status = ?, updated_at = ?
+    WHERE order_id = ?
+    """,
+    (status, updated_at, order_id),
+  )
+  return cursor.rowcount > 0
+
+
+def list_subscription_periods_for_user(
+  conn: sqlite3.Connection,
+  *,
+  user_id: str,
+) -> list[dict]:
+  rows = conn.execute(
+    """
+    SELECT
+      id,
+      user_id,
+      order_id,
+      plan_id,
+      status,
+      period_start,
+      period_end,
+      created_at,
+      updated_at
+    FROM subscription_periods
+    WHERE user_id = ?
+    ORDER BY period_end DESC, created_at DESC
+    """,
+    (user_id,),
+  ).fetchall()
+  return [dict(row) for row in rows]
+
+
+def get_latest_active_subscription_period(
+  conn: sqlite3.Connection,
+  *,
+  user_id: str,
+) -> Optional[dict]:
+  row = conn.execute(
+    """
+    SELECT
+      id,
+      user_id,
+      order_id,
+      plan_id,
+      status,
+      period_start,
+      period_end,
+      created_at,
+      updated_at
+    FROM subscription_periods
+    WHERE user_id = ? AND status = 'active'
+    ORDER BY period_end DESC
+    LIMIT 1
+    """,
+    (user_id,),
+  ).fetchone()
+  return dict(row) if row else None
 
 
 def get_subscription(conn: sqlite3.Connection, user_id: str) -> Optional[dict]:

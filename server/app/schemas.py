@@ -44,6 +44,7 @@ class PaymentTokenRequest(BaseModel):
   email: str = Field(..., min_length=3)
   phone: str = Field(..., min_length=6)
   company: Optional[str] = Field(None, max_length=120)
+  idempotency_key: str = Field(..., min_length=8, max_length=120)
 
 
 class PaymentTokenResponse(BaseModel):
@@ -60,6 +61,7 @@ class PaymentStatusResponse(BaseModel):
   status_code: Optional[str] = None
   gross_amount: Optional[int] = None
   currency: Optional[str] = None
+  paid_at: Optional[datetime] = None
   updated_at: Optional[datetime] = None
 
 

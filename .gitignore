@@ -80,6 +80,10 @@ ODIN.md
 TECH_STACK.md
 README.md
 Xendit-Payment-Gateway.md
+midtrans_sandbox.md
+MINDTRANS.md
+STAGING_GUIDE.md
+integration_midtrans.txt
 
 # Next.js build artifacts
 web/.next/

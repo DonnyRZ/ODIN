@@ -9,8 +9,6 @@ from google.genai import types
 from app.core.config import get_settings
 
 
-settings = get_settings()
-
 ASPECT_RATIO_MAP = {
   "square": ("square", "a square visual panel"),
   "portrait_9x16": ("portrait", "a tall story-style panel"),
@@ -50,6 +48,7 @@ def _decode_image_data(data_url: str) -> tuple[str, bytes]:
 
 class GenAIClient:
   def __init__(self):
+    settings = get_settings()
     self.prompt_client = genai.Client(api_key=settings.genai_api_key)
     self.image_client = genai.Client(api_key=settings.image_ai_key)
     self.prompt_model = settings.genai_model

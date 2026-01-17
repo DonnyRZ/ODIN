@@ -28,3 +28,47 @@ class GenerateResponse(BaseModel):
 class HealthResponse(BaseModel):
   status: str = "ok"
   service: str = "odin-server"
+
+
+class PlanItem(BaseModel):
+  id: str
+  name: str
+  price_idr: int
+  summary: str
+  features: List[str]
+
+
+class PaymentTokenRequest(BaseModel):
+  plan_id: str = Field(..., min_length=1)
+  name: str = Field(..., min_length=2)
+  email: str = Field(..., min_length=3)
+  phone: str = Field(..., min_length=6)
+  company: Optional[str] = Field(None, max_length=120)
+
+
+class PaymentTokenResponse(BaseModel):
+  order_id: str
+  token: str
+  redirect_url: Optional[str] = None
+
+
+class PaymentStatusResponse(BaseModel):
+  order_id: str
+  status: str
+  transaction_status: Optional[str] = None
+  fraud_status: Optional[str] = None
+  status_code: Optional[str] = None
+  gross_amount: Optional[int] = None
+  currency: Optional[str] = None
+  updated_at: Optional[datetime] = None
+
+
+class SubscriptionStatusResponse(BaseModel):
+  user_id: str
+  plan_id: str
+  status: str
+  order_id: Optional[str] = None
+  started_at: Optional[datetime] = None
+  current_period_end: Optional[datetime] = None
+  created_at: Optional[datetime] = None
+  updated_at: Optional[datetime] = None

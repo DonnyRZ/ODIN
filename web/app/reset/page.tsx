@@ -1,13 +1,14 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import type { Route } from 'next';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
 
 type ResetState = 'idle' | 'loading' | 'success' | 'error';
 
-export default function ResetPage() {
+function ResetPageContent() {
   const [password, setPassword] = useState('');
   const [state, setState] = useState<ResetState>('idle');
   const [message, setMessage] = useState<string>('');
@@ -82,12 +83,20 @@ export default function ResetPage() {
         </form>
         <button
           type="button"
-          onClick={() => router.push('/?auth=1')}
+          onClick={() => router.push('/login' as Route)}
           className="mt-4 w-full rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-700 hover:border-gray-300"
         >
           Back to login
         </button>
       </div>
     </main>
+  );
+}
+
+export default function ResetPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-white" />}>
+      <ResetPageContent />
+    </Suspense>
   );
 }

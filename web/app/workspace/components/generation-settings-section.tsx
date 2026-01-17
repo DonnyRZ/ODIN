@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
 import { getAuthToken } from '@/lib/workspace-storage';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
 
 type SseEvent = {
   event: string;

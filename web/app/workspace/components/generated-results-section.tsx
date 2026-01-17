@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
 
 const downloadImage = async (imageUrl: string, filename: string) => {
@@ -39,6 +40,32 @@ export function GeneratedResultsSection() {
   const placeholders = Array.from({ length: project.pendingSlots });
   const hasResults = visibleResults.length > 0;
   const hasError = project.generationStatus === 'error' && project.generationError;
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = async (id: string, imageUrl: string) => {
+    try {
+      await copyImage(imageUrl);
+      setCopiedId(id);
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = window.setTimeout(() => {
+        setCopiedId(null);
+        resetTimerRef.current = null;
+      }, 3000);
+    } catch {
+      // No-op: keep label as "Copy" if clipboard fails.
+    }
+  };
 
   return (
     <section className="px-10 py-8">
@@ -99,10 +126,10 @@ export function GeneratedResultsSection() {
                 <div className="flex flex-1 flex-col gap-2 px-4 py-4">
                   <button
                     type="button"
-                    onClick={() => copyImage(result.imageUrl)}
+                    onClick={() => handleCopy(result.id, result.imageUrl)}
                     className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
                   >
-                    Copy
+                    {copiedId === result.id ? 'Copied' : 'Copy'}
                   </button>
                   <button
                     type="button"

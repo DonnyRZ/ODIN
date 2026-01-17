@@ -13,6 +13,25 @@ body {
   color: #1f232b;
 }
 
+.odin-logo-spin {
+  animation: odin-logo-spin 10s linear infinite;
+}
+
+@keyframes odin-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .odin-logo-spin {
+    animation: none;
+  }
+}
+
 a {
   color: inherit;
   text-decoration: none;

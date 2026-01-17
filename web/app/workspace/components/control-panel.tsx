@@ -9,7 +9,7 @@ import { SlideUploadSection } from './slide-upload-section';
 import { getAuthToken } from '@/lib/workspace-storage';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
 
 const readFileAsDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {

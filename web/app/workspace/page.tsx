@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { Route } from 'next';
 import { getAuthToken } from '@/lib/workspace-storage';
 import { ControlPanel } from './components/control-panel';
 import { WorkspaceHeader } from './components/workspace-header';
@@ -16,7 +17,7 @@ export default function WorkspacePage() {
   useEffect(() => {
     const token = getAuthToken();
     if (!token) {
-      router.replace('/?auth=1');
+      router.replace('/login?next=/workspace' as Route);
       return;
     }
     setIsCheckingAuth(false);

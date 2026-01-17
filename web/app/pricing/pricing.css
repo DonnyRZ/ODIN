@@ -1,0 +1,399 @@
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+      :root {
+        --bg: #ffffff;
+        --bg-soft: #f8fafc;
+        --card: #ffffff;
+        --card-border: rgba(15, 23, 42, 0.08);
+        --text: #0f172a;
+        --muted: #3f4857;
+        --accent: #c1121f;
+        --accent-2: #e11d48;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      .pricing-page {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        background: radial-gradient(140% 140% at 20% 0%, #fff1f2 0%, #f8fafc 55%, #ffffff 100%);
+        color: var(--text);
+      }
+
+      .pricing-page a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .pricing-page .page {
+        position: relative;
+        padding: 40px 24px 80px;
+      }
+
+      .pricing-page .page::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(120deg, rgba(193, 18, 31, 0.12), rgba(240, 93, 94, 0) 45%),
+          repeating-linear-gradient(
+            135deg,
+            rgba(15, 23, 42, 0.05) 0 140px,
+            rgba(255, 255, 255, 0) 140px 260px
+          );
+        opacity: 0.7;
+        pointer-events: none;
+      }
+
+      .pricing-page .container {
+        position: relative;
+        z-index: 1;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .pricing-page .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 48px;
+      }
+
+      .pricing-page .nav-actions {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .pricing-page .nav-user {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .pricing-page .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .pricing-page .brand-mark {
+        width: 54px;
+        height: 54px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.95);
+        border: 2px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+      }
+
+      .pricing-page .brand-mark img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+        animation: logo-spin 8s linear infinite;
+      }
+
+      @keyframes logo-spin {
+        .pricing-page from {
+          transform: rotate(0deg);
+        }
+        .pricing-page to {
+          transform: rotate(-360deg);
+        }
+      }
+
+      .pricing-page .nav-link {
+        font-size: 14px;
+        color: var(--muted);
+        font-weight: 600;
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+      }
+
+      .pricing-page .hero {
+        text-align: center;
+        margin-bottom: 48px;
+      }
+
+      .pricing-page .hero h1 {
+        margin: 0 0 12px;
+        font-size: clamp(28px, 3.6vw, 44px);
+        letter-spacing: -0.02em;
+      }
+
+      .pricing-page .hero p {
+        margin: 0 auto;
+        max-width: 640px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.6;
+      }
+
+      .pricing-page .pricing-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 24px;
+      }
+
+      .pricing-page .plan-card {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: 20px;
+        padding: 22px;
+        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .pricing-page .plan-card--featured {
+        border: 1px solid rgba(193, 18, 31, 0.4);
+        box-shadow: 0 20px 40px rgba(193, 18, 31, 0.15);
+      }
+
+      .pricing-page .plan-title {
+        font-size: 20px;
+        font-weight: 700;
+        margin: 0;
+      }
+
+      .pricing-page .plan-price {
+        font-size: 32px;
+        font-weight: 700;
+        margin: 0;
+      }
+
+      .pricing-page .plan-price span {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--muted);
+      }
+
+      .pricing-page .plan-desc {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .pricing-page .cta-btn {
+        border: none;
+        border-radius: 999px;
+        padding: 12px 18px;
+        font-weight: 600;
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        cursor: pointer;
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+      }
+
+      .pricing-page .cta-btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+
+      .pricing-page .cta-btn--ghost {
+        background: #ffffff;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        color: #0f172a;
+      }
+
+      .pricing-page .feature-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 10px;
+        font-size: 14px;
+        color: #111827;
+      }
+
+      .pricing-page .feature-list li {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .pricing-page .feature-list li::before {
+        content: "?";
+        color: #c1121f;
+        font-size: 12px;
+        line-height: 1.4;
+        margin-top: 2px;
+      }
+
+      .pricing-page .plan-meta {
+        margin-top: auto;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .pricing-page .auth-section {
+        margin-top: 56px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: 28px;
+        align-items: start;
+      }
+
+      .pricing-page .auth-copy h2 {
+        margin: 0 0 12px;
+        font-size: 24px;
+      }
+
+      .pricing-page .auth-copy p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .pricing-page .auth-next {
+        font-weight: 600;
+        color: #111827;
+      }
+
+      .pricing-page .auth-card {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: 20px;
+        padding: 22px;
+        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+      }
+
+      .pricing-page .auth-form {
+        display: grid;
+        gap: 14px;
+      }
+
+      .pricing-page .auth-form label {
+        display: grid;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .pricing-page .auth-form input {
+        border-radius: 14px;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        padding: 12px 14px;
+        font-size: 14px;
+        font-family: inherit;
+        color: var(--text);
+        background: #ffffff;
+      }
+
+      .pricing-page .auth-note {
+        font-size: 12px;
+        font-weight: 600;
+        color: #047857;
+      }
+
+      .pricing-page .auth-error {
+        font-size: 12px;
+        font-weight: 600;
+        color: #b91c1c;
+      }
+
+      .pricing-page .auth-switch {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .pricing-page .auth-link {
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: 12px;
+        font-weight: 700;
+        color: #b91c1c;
+        cursor: pointer;
+      }
+
+      .pricing-page .auth-signed-in {
+        display: grid;
+        gap: 12px;
+      }
+
+      .pricing-page .auth-label {
+        margin: 0;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+      }
+
+      .pricing-page .auth-identity {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .pricing-page .auth-helper {
+        margin: 0;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .pricing-page .pricing-footer {
+        margin-top: 48px;
+        text-align: center;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .pricing-page .pricing-footer-inner {
+        display: grid;
+        gap: 12px;
+        justify-items: center;
+      }
+
+      .pricing-page .pricing-footer-links {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        justify-content: center;
+        font-weight: 600;
+      }
+
+      @media (max-width: 980px) {
+        .pricing-page .pricing-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 720px) {
+        .pricing-page .nav {
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .pricing-page .pricing-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .pricing-page .auth-section {
+          grid-template-columns: 1fr;
+        }
+      }
+    

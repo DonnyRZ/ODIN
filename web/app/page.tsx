@@ -1,17 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import type { Route } from 'next';
 import {
   clearAuthToken,
   getAuthToken,
   setActiveProjectId,
+  setAuthProfile,
   setAuthToken,
 } from '@/lib/workspace-storage';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
 
 type ProjectSummary = {
   id: string;
@@ -26,10 +28,10 @@ const steps: Array<[string, string]> = [
   ['Drop a slide', "Upload a PNG/JPG of the slide you're editing - ODIN ingests it instantly."],
   ['Choose the aspect ratio', 'Pick square, 9:16, or 16:9 so ODIN matches your slide layout.'],
   ['Describe the slide', 'Paste the title/body copy so ODIN captures the intent and language.'],
-  ['Paste the result', 'Pick your favorite visual, copy to clipboard, and drop it straight into your deck.']
+  ['Paste the result', 'Pick your favorite visual, copy to clipboard, and drop it straight into your PPT.']
 ];
 
-export default function HomePage() {
+function HomePageContent() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [authToken, setAuthTokenState] = useState<string | null>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -41,6 +43,8 @@ export default function HomePage() {
   const [password, setPassword] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
+  const nextParam = searchParams.get('next');
+  const nextRedirect = nextParam && nextParam.startsWith('/') ? nextParam : null;
 
   useEffect(() => {
     const storedToken = getAuthToken();
@@ -98,7 +102,6 @@ export default function HomePage() {
   };
 
   const handleAuthSubmit = async () => {
-    console.log('[auth] submit', { authMode, email, username });
     setAuthError(null);
     setAuthNotice(null);
     let endpoint = 'login';
@@ -127,8 +130,6 @@ export default function HomePage() {
         body: JSON.stringify(body),
       });
 
-      console.log('[auth] response', endpoint, response.status);
-
       if (!response.ok) {
         const text = await readErrorMessage(response);
         setAuthError(text);
@@ -136,11 +137,24 @@ export default function HomePage() {
     }
 
       if (authMode === 'login') {
-        const payload = (await response.json()) as { token: string };
+        const payload = (await response.json()) as {
+          token: string;
+          email: string;
+          username?: string;
+          user_id?: string;
+        };
         setAuthToken(payload.token);
+        setAuthProfile({
+          email: payload.email,
+          username: payload.username,
+          userId: payload.user_id,
+        });
         setAuthTokenState(payload.token);
         setIsAuthOpen(false);
         setPassword('');
+        if (nextRedirect) {
+          router.push(nextRedirect as Route);
+        }
         return;
       }
 
@@ -153,8 +167,7 @@ export default function HomePage() {
 
       setAuthNotice('If an account exists, a reset email has been sent.');
       setAuthMode('login');
-    } catch (error) {
-      console.error('[auth] request failed', error);
+    } catch {
       setAuthError('Unable to reach the server. Check API base URL and backend status.');
     }
   };
@@ -194,7 +207,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-10 border-b border-gray-200 bg-white">
         <div className="flex w-full items-center justify-between px-8 py-1">
           <div className="flex items-center gap-3 font-semibold tracking-wide text-gray-900">
-            <Image src="/logo.jpeg" width={70} height={70} alt="ODIN logo" priority />
+            <Image src="/logo.png" width={70} height={70} alt="ODIN logo" priority className="odin-logo-spin" />
             <span>ODIN</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-gray-500">
@@ -420,5 +433,13 @@ export default function HomePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-white" />}>
+      <HomePageContent />
+    </Suspense>
   );
 }

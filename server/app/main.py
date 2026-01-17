@@ -1,13 +1,16 @@
 import base64
+import hashlib
 import json
 from datetime import datetime, timedelta
+from time import perf_counter, time
 from uuid import uuid4
 
 import logging
 import sqlite3
-from time import perf_counter
+import requests
+from collections import defaultdict, deque
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -38,20 +41,38 @@ from .core.db import (
   save_generated_image,
   save_slide_image,
   update_project_slide_image,
+  create_payment_order,
+  get_payment_order,
+  update_payment_order_status,
+  get_subscription,
+  upsert_subscription,
 )
-from .schemas import GenerateRequest, HealthResponse
+from .schemas import (
+  GenerateRequest,
+  HealthResponse,
+  PlanItem,
+  PaymentStatusResponse,
+  PaymentTokenRequest,
+  PaymentTokenResponse,
+  SubscriptionStatusResponse,
+)
+from .plans import get_plan_catalog
 from .services.email_client import send_email
 from .services.genai_client import genai_client
 from .services.rembg_client import remove_background
 
 
 def _allowed_origins() -> list[str]:
-  return [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://odin.local",
-    "*",
-  ]
+  settings = get_settings()
+  origins = [origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()]
+  return origins or ["http://localhost:3000"]
+
+
+def _allowed_origin_regex(origins: list[str]) -> str | None:
+  for origin in origins:
+    if origin.startswith("chrome-extension://"):
+      return r"^chrome-extension://.*$"
+  return None
 
 
 app = FastAPI(
@@ -59,9 +80,28 @@ app = FastAPI(
   version="0.1.0",
   description="Service that orchestrates LLM + image generation for the ODIN workspace.",
 )
+router = APIRouter(prefix="/api")
 
 logger = logging.getLogger("odin")
 logger.setLevel(logging.INFO)
+
+_auth_requests: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+
+
+def _rate_limit_auth(request: Request, action: str) -> None:
+  settings = get_settings()
+  limit = settings.auth_rate_limit_per_minute
+  window_seconds = 60.0
+  client_ip = request.client.host if request.client else "unknown"
+  key = (client_ip, action)
+  now = time()
+  window = _auth_requests[key]
+  while window and window[0] <= now - window_seconds:
+    window.popleft()
+  if len(window) >= limit:
+    logger.warning("Rate limit hit for %s from %s", action, client_ip)
+    raise HTTPException(status_code=429, detail="Too many requests. Please try again soon.")
+  window.append(now)
 
 
 def _sse_event(event: str, payload: dict) -> bytes:
@@ -72,12 +112,18 @@ def _sse_event(event: str, payload: dict) -> bytes:
 def _require_user_id(request: Request) -> str:
   auth_header = request.headers.get("Authorization", "")
   if not auth_header.startswith("Bearer "):
+    settings = get_settings()
+    if settings.allow_unauthenticated_generate and request.url.path.endswith("/generate"):
+      return "anonymous"
     raise HTTPException(status_code=401, detail="Authorization required.")
   token = auth_header.replace("Bearer ", "").strip()
   now = datetime.utcnow().isoformat() + "Z"
   with db_connection() as conn:
     user_id = get_user_id_for_token(conn, token, now)
   if not user_id:
+    settings = get_settings()
+    if settings.allow_unauthenticated_generate and request.url.path.endswith("/generate"):
+      return "anonymous"
     raise HTTPException(status_code=401, detail="Invalid or expired session.")
   return user_id
 
@@ -114,6 +160,86 @@ def _is_valid_email(email: str) -> bool:
   return "." in domain
 
 
+def _split_name(full_name: str) -> tuple[str, str]:
+  parts = full_name.strip().split()
+  if not parts:
+    return "Customer", ""
+  if len(parts) == 1:
+    return parts[0], ""
+  return parts[0], " ".join(parts[1:])
+
+
+def _generate_order_id(plan_id: str) -> str:
+  return f"ODIN-{plan_id.upper()}-{uuid4().hex}"
+
+
+def _parse_amount(value: object) -> int:
+  if value is None:
+    return 0
+  if isinstance(value, (int, float)):
+    return int(value)
+  text = str(value).strip()
+  if not text:
+    return 0
+  try:
+    return int(float(text))
+  except ValueError:
+    return 0
+
+
+def _midtrans_is_production(settings) -> bool:
+  env = (settings.midtrans_env or "").strip().lower()
+  return settings.midtrans_is_production or env == "production"
+
+
+def _midtrans_snap_base_url(settings) -> str:
+  if _midtrans_is_production(settings):
+    return "https://app.midtrans.com"
+  return "https://app.sandbox.midtrans.com"
+
+
+def _midtrans_auth_header(server_key: str) -> str:
+  raw = f"{server_key}:".encode("ascii")
+  return base64.b64encode(raw).decode("ascii")
+
+
+def _midtrans_signature(
+  *,
+  order_id: str,
+  status_code: str,
+  gross_amount: str,
+  server_key: str,
+) -> str:
+  raw = f"{order_id}{status_code}{gross_amount}{server_key}".encode("utf-8")
+  return hashlib.sha512(raw).hexdigest()
+
+
+def _map_midtrans_status(transaction_status: str | None, fraud_status: str | None) -> str:
+  if not transaction_status:
+    return "UNKNOWN"
+  if transaction_status in ("capture", "settlement"):
+    if fraud_status == "challenge":
+      return "PENDING"
+    return "PAID"
+  if transaction_status in ("pending", "authorize"):
+    return "PENDING"
+  if transaction_status in ("deny", "cancel", "expire"):
+    return "FAILED"
+  if transaction_status in ("refund", "partial_refund", "chargeback", "partial_chargeback"):
+    return "REFUNDED"
+  return "UNKNOWN"
+
+
+def _map_subscription_status(payment_status: str) -> str:
+  if payment_status == "PAID":
+    return "active"
+  if payment_status == "PENDING":
+    return "pending"
+  if payment_status in ("FAILED", "REFUNDED"):
+    return "canceled"
+  return "pending"
+
+
 def _decode_image_data(data_url: str) -> bytes:
   if not data_url:
     raise ValueError("Slide image missing.")
@@ -126,9 +252,11 @@ def _decode_image_data(data_url: str) -> bytes:
   except Exception as exc:
     raise ValueError("Invalid slide image data.") from exc
 
+_cors_origins = _allowed_origins()
 app.add_middleware(
   CORSMiddleware,
-  allow_origins=_allowed_origins(),
+  allow_origins=_cors_origins,
+  allow_origin_regex=_allowed_origin_regex(_cors_origins),
   allow_credentials=True,
   allow_methods=["*"],
   allow_headers=["*"],
@@ -140,12 +268,238 @@ def startup():
   init_db()
 
 
-@app.get("/health", response_model=HealthResponse, tags=["system"])
+@router.get("/health", response_model=HealthResponse, tags=["system"])
 async def health_check() -> HealthResponse:
   return HealthResponse()
 
 
-@app.get("/projects", tags=["projects"])
+@router.get("/plans", response_model=list[PlanItem], tags=["billing"])
+async def list_plans_handler() -> list[PlanItem]:
+  return [PlanItem(**plan.__dict__) for plan in get_plan_catalog()]
+
+
+@router.post("/payments/midtrans/token", response_model=PaymentTokenResponse, tags=["payments"])
+async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) -> PaymentTokenResponse:
+  settings = get_settings()
+  if not settings.midtrans_server_key or not settings.midtrans_client_key:
+    raise HTTPException(status_code=500, detail="Midtrans keys are not configured.")
+  user_id = _require_user_id(request)
+  name = payload.name.strip()
+  email = payload.email.strip()
+  phone = payload.phone.strip()
+  if not name:
+    raise HTTPException(status_code=400, detail="Name required.")
+  if not _is_valid_email(email):
+    raise HTTPException(status_code=400, detail="Valid email required.")
+  if not phone:
+    raise HTTPException(status_code=400, detail="Phone number required.")
+
+  plan = next((plan for plan in get_plan_catalog() if plan.id == payload.plan_id), None)
+  if not plan:
+    raise HTTPException(status_code=400, detail="Plan not found.")
+
+  order_id = _generate_order_id(plan.id)
+  first_name, last_name = _split_name(name)
+  request_payload = {
+    "transaction_details": {"order_id": order_id, "gross_amount": plan.price_idr},
+    "credit_card": {"secure": True},
+    "customer_details": {
+      "first_name": first_name,
+      "last_name": last_name,
+      "email": email,
+      "phone": phone,
+    },
+    "item_details": [
+      {
+        "id": f"plan-{plan.id}",
+        "price": plan.price_idr,
+        "quantity": 1,
+        "name": f"ODIN {plan.name}",
+      }
+    ],
+  }
+  headers = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Authorization": f"Basic {_midtrans_auth_header(settings.midtrans_server_key)}",
+  }
+  snap_url = f"{_midtrans_snap_base_url(settings)}/snap/v1/transactions"
+  try:
+    response = requests.post(snap_url, headers=headers, json=request_payload, timeout=20)
+  except requests.RequestException as exc:
+    raise HTTPException(status_code=502, detail="Failed to reach Midtrans.") from exc
+
+  if response.status_code != 201:
+    detail = "Midtrans token request failed."
+    try:
+      body = response.json()
+      error_messages = body.get("error_messages")
+      if isinstance(error_messages, list):
+        detail = "; ".join(error_messages)
+      elif error_messages:
+        detail = str(error_messages)
+      elif body.get("message"):
+        detail = str(body["message"])
+    except ValueError:
+      detail = f"{detail} ({response.text})"
+    raise HTTPException(status_code=502, detail=detail)
+
+  data = response.json()
+  token = data.get("token")
+  if not token:
+    raise HTTPException(status_code=502, detail="Midtrans response missing token.")
+
+  now = datetime.utcnow().isoformat() + "Z"
+  with db_connection() as conn:
+    if get_payment_order(conn, order_id):
+      order_id = _generate_order_id(plan.id)
+    create_payment_order(
+      conn,
+      order_id=order_id,
+      user_id=user_id,
+      plan_id=plan.id,
+      gross_amount=plan.price_idr,
+      currency="IDR",
+      customer_name=name,
+      customer_email=email,
+      customer_phone=phone,
+      status="CREATED",
+      created_at=now,
+      updated_at=now,
+      snap_token=token,
+    )
+    upsert_subscription(
+      conn,
+      user_id=user_id,
+      plan_id=plan.id,
+      status="pending",
+      order_id=order_id,
+      started_at=None,
+      current_period_end=None,
+      created_at=now,
+      updated_at=now,
+    )
+
+  return PaymentTokenResponse(
+    order_id=order_id,
+    token=token,
+    redirect_url=data.get("redirect_url"),
+  )
+
+
+@router.post("/payments/midtrans/notify", tags=["payments"])
+async def midtrans_notification(request: Request):
+  payload = await request.json()
+  if not isinstance(payload, dict):
+    raise HTTPException(status_code=400, detail="Invalid notification payload.")
+
+  order_id = payload.get("order_id")
+  status_code = payload.get("status_code")
+  gross_amount = payload.get("gross_amount")
+  signature_key = payload.get("signature_key")
+  if not order_id or not status_code or not gross_amount or not signature_key:
+    raise HTTPException(status_code=400, detail="Missing notification fields.")
+
+  settings = get_settings()
+  if not settings.midtrans_server_key:
+    raise HTTPException(status_code=500, detail="Midtrans server key missing.")
+
+  expected = _midtrans_signature(
+    order_id=str(order_id),
+    status_code=str(status_code),
+    gross_amount=str(gross_amount),
+    server_key=settings.midtrans_server_key,
+  )
+  if signature_key != expected:
+    raise HTTPException(status_code=403, detail="Invalid notification signature.")
+
+  transaction_status = payload.get("transaction_status")
+  fraud_status = payload.get("fraud_status")
+  internal_status = _map_midtrans_status(transaction_status, fraud_status)
+  notification_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
+  now = datetime.utcnow().isoformat() + "Z"
+
+  with db_connection() as conn:
+    order = get_payment_order(conn, str(order_id))
+    if order:
+      update_payment_order_status(
+        conn,
+        order_id=str(order_id),
+        status=internal_status,
+        transaction_status=transaction_status,
+        fraud_status=fraud_status,
+        status_code=str(status_code),
+        last_notification_json=notification_json,
+        updated_at=now,
+      )
+    else:
+      create_payment_order(
+        conn,
+        order_id=str(order_id),
+        plan_id="unknown",
+        gross_amount=_parse_amount(gross_amount),
+        currency="IDR",
+        customer_name="",
+        customer_email="",
+        customer_phone="",
+        status=internal_status,
+        created_at=now,
+        updated_at=now,
+        transaction_status=transaction_status,
+        fraud_status=fraud_status,
+        status_code=str(status_code),
+        last_notification_json=notification_json,
+      )
+    if not order:
+      order = get_payment_order(conn, str(order_id))
+    if order and order.get("user_id"):
+      subscription_status = _map_subscription_status(internal_status)
+      started_at = now if subscription_status == "active" else None
+      upsert_subscription(
+        conn,
+        user_id=str(order["user_id"]),
+        plan_id=order.get("plan_id") or "unknown",
+        status=subscription_status,
+        order_id=str(order_id),
+        started_at=started_at,
+        current_period_end=None,
+        created_at=now,
+        updated_at=now,
+      )
+
+  return {"received": True}
+
+
+@router.get("/payments/midtrans/status", response_model=PaymentStatusResponse, tags=["payments"])
+async def midtrans_status(request: Request, order_id: str) -> PaymentStatusResponse:
+  user_id = _require_user_id(request)
+  with db_connection() as conn:
+    order = get_payment_order(conn, order_id)
+  if not order or str(order.get("user_id")) != user_id:
+    raise HTTPException(status_code=404, detail="Order not found.")
+  return PaymentStatusResponse(
+    order_id=order["order_id"],
+    status=order["status"],
+    transaction_status=order.get("transaction_status"),
+    fraud_status=order.get("fraud_status"),
+    status_code=order.get("status_code"),
+    gross_amount=order.get("gross_amount"),
+    currency=order.get("currency"),
+    updated_at=order.get("updated_at"),
+  )
+
+
+@router.get("/subscriptions/me", response_model=SubscriptionStatusResponse, tags=["subscriptions"])
+async def get_subscription_me(request: Request) -> SubscriptionStatusResponse:
+  user_id = _require_user_id(request)
+  with db_connection() as conn:
+    subscription = get_subscription(conn, user_id)
+  if not subscription:
+    raise HTTPException(status_code=404, detail="Subscription not found.")
+  return SubscriptionStatusResponse(**subscription)
+
+
+@router.get("/projects", tags=["projects"])
 async def list_projects_handler(request: Request):
   owner_id = _require_user_id(request)
   with db_connection() as conn:
@@ -153,7 +507,7 @@ async def list_projects_handler(request: Request):
   return {"projects": projects}
 
 
-@app.post("/projects", tags=["projects"])
+@router.post("/projects", tags=["projects"])
 async def create_project_handler(request: Request, payload: dict):
   owner_id = _require_user_id(request)
   name = payload.get("name") or "Untitled project"
@@ -170,7 +524,7 @@ async def create_project_handler(request: Request, payload: dict):
   return {"id": project_id}
 
 
-@app.patch("/projects/{project_id}", tags=["projects"])
+@router.patch("/projects/{project_id}", tags=["projects"])
 async def update_project_handler(request: Request, project_id: str, payload: dict):
   owner_id = _require_user_id(request)
   name = payload.get("name")
@@ -195,7 +549,7 @@ async def update_project_handler(request: Request, project_id: str, payload: dic
   return {"id": project_id, "name": name, "updated_at": timestamp}
 
 
-@app.get("/projects/{project_id}", tags=["projects"])
+@router.get("/projects/{project_id}", tags=["projects"])
 async def get_project_handler(request: Request, project_id: str):
   resolved_owner = _require_user_id(request)
   with db_connection() as conn:
@@ -206,7 +560,7 @@ async def get_project_handler(request: Request, project_id: str):
   return {"project": project, "generations": generations}
 
 
-@app.post("/projects/{project_id}/slide-image", tags=["projects"])
+@router.post("/projects/{project_id}/slide-image", tags=["projects"])
 async def upload_project_slide_image(request: Request, project_id: str, payload: dict):
   owner_id = _require_user_id(request)
   image_data = payload.get("slide_image_base64") or ""
@@ -229,7 +583,7 @@ async def upload_project_slide_image(request: Request, project_id: str, payload:
   return {"slide_image_path": image_path, "updated_at": updated_at}
 
 
-@app.get("/projects/{project_id}/slide-image", tags=["projects"])
+@router.get("/projects/{project_id}/slide-image", tags=["projects"])
 async def get_project_slide_image(request: Request, project_id: str):
   owner_id = _require_user_id(request)
   with db_connection() as conn:
@@ -242,7 +596,7 @@ async def get_project_slide_image(request: Request, project_id: str):
   return FileResponse(full_path, media_type="image/png")
 
 
-@app.delete("/projects/{project_id}/slide-image", tags=["projects"])
+@router.delete("/projects/{project_id}/slide-image", tags=["projects"])
 async def delete_project_slide_image(request: Request, project_id: str):
   owner_id = _require_user_id(request)
   with db_connection() as conn:
@@ -266,7 +620,7 @@ async def delete_project_slide_image(request: Request, project_id: str):
   return {"id": project_id}
 
 
-@app.delete("/projects/{project_id}", tags=["projects"])
+@router.delete("/projects/{project_id}", tags=["projects"])
 async def delete_project_handler(request: Request, project_id: str):
   resolved_owner = _require_user_id(request)
   with db_connection() as conn:
@@ -292,7 +646,7 @@ async def delete_project_handler(request: Request, project_id: str):
   return {"id": project_id}
 
 
-@app.get("/generations/{generation_id}/image", tags=["generations"])
+@router.get("/generations/{generation_id}/image", tags=["generations"])
 async def get_generation_image(request: Request, generation_id: str):
   owner_id = _require_user_id(request)
   with db_connection() as conn:
@@ -305,7 +659,7 @@ async def get_generation_image(request: Request, generation_id: str):
   return FileResponse(full_path, media_type="image/png")
 
 
-@app.post("/generate", tags=["generation"])
+@router.post("/generate", tags=["generation"])
 async def generate_visuals(request: Request, payload: GenerateRequest):
   if not payload.prompt and not payload.slide_context:
     raise HTTPException(status_code=400, detail="Prompt or slide context required.")
@@ -399,8 +753,9 @@ async def generate_visuals(request: Request, payload: GenerateRequest):
   return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@app.post("/auth/register", tags=["auth"])
-async def register_user(payload: dict):
+@router.post("/auth/register", tags=["auth"])
+async def register_user(request: Request, payload: dict):
+  _rate_limit_auth(request, "register")
   email = _normalize_email(payload.get("email") or "")
   username = (payload.get("username") or "").strip()
   password = payload.get("password") or ""
@@ -433,8 +788,9 @@ async def register_user(payload: dict):
   return {"message": "Account created."}
 
 
-@app.post("/auth/login", tags=["auth"])
-async def login_user(payload: dict):
+@router.post("/auth/login", tags=["auth"])
+async def login_user(request: Request, payload: dict):
+  _rate_limit_auth(request, "login")
   email = _normalize_email(payload.get("email") or "")
   password = payload.get("password") or ""
   if not email or not password:
@@ -460,8 +816,9 @@ async def login_user(payload: dict):
   }
 
 
-@app.post("/auth/forgot-password", tags=["auth"])
-async def forgot_password(payload: dict):
+@router.post("/auth/forgot-password", tags=["auth"])
+async def forgot_password(request: Request, payload: dict):
+  _rate_limit_auth(request, "forgot-password")
   email = _normalize_email(payload.get("email") or "")
   if not _is_valid_email(email):
     raise HTTPException(status_code=400, detail="Valid email required.")
@@ -482,8 +839,9 @@ async def forgot_password(payload: dict):
   return {"message": "If an account exists, a reset email has been sent."}
 
 
-@app.post("/auth/reset-password", tags=["auth"])
-async def reset_password(payload: dict):
+@router.post("/auth/reset-password", tags=["auth"])
+async def reset_password(request: Request, payload: dict):
+  _rate_limit_auth(request, "reset-password")
   token = (payload.get("token") or "").strip()
   password = payload.get("password") or ""
   if not token:
@@ -498,3 +856,6 @@ async def reset_password(payload: dict):
     password_hash = hash_password(password)
     update_user_password(conn, user_id, password_hash)
   return {"message": "Password updated."}
+
+
+app.include_router(router)

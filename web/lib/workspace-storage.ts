@@ -23,6 +23,13 @@ export type WorkspaceProject = {
 const PROJECT_STORAGE_KEY = 'odin.workspace.project';
 const ACTIVE_PROJECT_KEY = 'odin.workspace.active_project';
 const AUTH_TOKEN_KEY = 'odin.workspace.auth_token';
+const AUTH_PROFILE_KEY = 'odin.workspace.auth_profile';
+
+export type AuthProfile = {
+  email: string;
+  username?: string;
+  userId?: string;
+};
 
 const isBrowser = () => typeof window !== 'undefined';
 
@@ -70,6 +77,17 @@ export const setAuthToken = (token: string) => {
   window.localStorage.setItem(AUTH_TOKEN_KEY, token);
 };
 
+export const setAuthProfile = (profile: AuthProfile) => {
+  if (!isBrowser()) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(AUTH_PROFILE_KEY, JSON.stringify(profile));
+  } catch {
+    // Ignore quota errors for now.
+  }
+};
+
 export const getAuthToken = (): string | null => {
   if (!isBrowser()) {
     return null;
@@ -77,11 +95,27 @@ export const getAuthToken = (): string | null => {
   return window.localStorage.getItem(AUTH_TOKEN_KEY);
 };
 
+export const getAuthProfile = (): AuthProfile | null => {
+  if (!isBrowser()) {
+    return null;
+  }
+  const raw = window.localStorage.getItem(AUTH_PROFILE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as AuthProfile;
+  } catch {
+    return null;
+  }
+};
+
 export const clearAuthToken = () => {
   if (!isBrowser()) {
     return;
   }
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  window.localStorage.removeItem(AUTH_PROFILE_KEY);
 };
 
 export const loadWorkspaceProject = (): WorkspaceProject => {

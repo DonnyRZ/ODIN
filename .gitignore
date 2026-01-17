@@ -26,9 +26,22 @@ build/
 
 # Output directories
 outputs/
+server/data/
+client_secret_*.json
+data/
+backups/
+web/out/
+web/out.tar.gz
+out.tar.gz
+server.tar.gz
+web/server.tar.gz
+*.tar.gz
+temp.bin
+output-*.txt
 
 # Test directories
 ai-tests/
+test-onboarding/
 
 # Environment variables
 .env
@@ -67,8 +80,14 @@ temp/
 
 # Project files to ignore (current workspace snapshot)
 DESIGN_RULES.md
-# ODIN.md
+ODIN.md
 TECH_STACK.md
+README.md
+Xendit-Payment-Gateway.md
+midtrans_sandbox.md
+MINDTRANS.md
+STAGING_GUIDE.md
+integration_midtrans.txt
 
 # Next.js build artifacts
 web/.next/

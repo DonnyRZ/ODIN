@@ -42,17 +42,17 @@ export default function WorkspacePage() {
             </div>
             <main className="flex-1 overflow-y-auto bg-white">
               <section className="border-b border-gray-200 px-10 py-8">
-              <div className="mx-auto max-w-4xl">
-                <header className="mb-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Slide preview</p>
-                    <p className="text-sm text-gray-500">16:9 canvas preview of your uploaded slide</p>
-                  </div>
-                  <div className="flex items-center gap-2" />
-                </header>
-                <WorkspaceSlidePreview />
-              </div>
-            </section>
+                <div className="mx-auto max-w-4xl">
+                  <header className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Slide preview</p>
+                      <p className="text-sm text-gray-500">16:9 canvas preview of your uploaded slide</p>
+                    </div>
+                    <div className="flex items-center gap-2" />
+                  </header>
+                  <WorkspaceSlidePreview />
+                </div>
+              </section>
               <GeneratedResultsSection />
             </main>
           </div>

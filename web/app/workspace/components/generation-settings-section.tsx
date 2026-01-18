@@ -90,6 +90,7 @@ export function GenerationSettingsSection() {
           prompt: project.prompt ?? '',
           slide_context: project.prompt ?? '',
           slide_image_base64: slideImageBase64,
+          slide_image_base64: project.slideImage,
           variant_count: variantCount,
           creativity: 0.7,
           aspect_ratio: aspectRatio,

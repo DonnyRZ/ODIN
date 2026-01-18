@@ -91,12 +91,9 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
 
         const activeProject =
           listPayload.projects.find((entry) => entry.id === projectIdFromUrl) ?? listPayload.projects[0];
-        const projectResponse = await fetch(
-          `${API_BASE_URL}/projects/${activeProject.id}`,
-          {
-            headers: { Authorization: `Bearer ${authToken}` },
-          },
-        );
+        const projectResponse = await fetch(`${API_BASE_URL}/projects/${activeProject.id}`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
         if (!projectResponse.ok) {
           throw new Error('Failed to load project');
         }
@@ -121,12 +118,9 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
 
         const results: WorkspaceGenerationResult[] = await Promise.all(
           projectPayload.generations.map(async (generation) => {
-            const imageResponse = await fetch(
-              `${API_BASE_URL}/generations/${generation.id}/image`,
-              {
-                headers: { Authorization: `Bearer ${authToken}` },
-              },
-            );
+            const imageResponse = await fetch(`${API_BASE_URL}/generations/${generation.id}/image`, {
+              headers: { Authorization: `Bearer ${authToken}` },
+            });
             if (!imageResponse.ok) {
               throw new Error('Failed to load image.');
             }

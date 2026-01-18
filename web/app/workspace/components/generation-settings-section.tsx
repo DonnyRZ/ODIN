@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useWorkspaceProject } from '../hooks/use-workspace-project';
+import { getAuthToken } from '@/lib/workspace-storage';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8800';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
 
 type SseEvent = {
   event: string;
@@ -27,6 +28,30 @@ const parseSseEvent = (chunk: string): SseEvent => {
   };
 };
 
+const toDataUrl = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const resolveSlideImage = async (slideImage: string, authToken: string) => {
+  if (slideImage.startsWith('data:')) {
+    return slideImage;
+  }
+  const response = await fetch(slideImage, {
+    headers: {
+      Authorization: `Bearer ${authToken}`,
+    },
+  });
+  if (!response.ok) {
+    throw new Error('Unable to load slide image.');
+  }
+  const blob = await response.blob();
+  return toDataUrl(blob);
+};
+
 export function GenerationSettingsSection() {
   const { project, appendGenerationResults, setGenerationState, setPendingSlots } = useWorkspaceProject();
   const [formError, setFormError] = useState<string | null>(null);
@@ -46,15 +71,25 @@ export function GenerationSettingsSection() {
     setPendingSlots(variantCount);
 
     try {
+      const authToken = getAuthToken();
+      if (!authToken) {
+        setGenerationState('error', 'Authentication required.');
+        setFormError('Please log in to generate visuals.');
+        setPendingSlots(0);
+        return;
+      }
+      const slideImageBase64 = await resolveSlideImage(project.slideImage, authToken);
       const response = await fetch(`${API_BASE_URL}/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
           project_name: project.name,
           prompt: project.prompt ?? '',
           slide_context: project.prompt ?? '',
+          slide_image_base64: slideImageBase64,
           slide_image_base64: project.slideImage,
           variant_count: variantCount,
           creativity: 0.7,

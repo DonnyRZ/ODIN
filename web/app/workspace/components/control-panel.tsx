@@ -6,8 +6,10 @@ import { GenerationSettingsSection } from './generation-settings-section';
 import { ProjectInfoSection } from './project-info-section';
 import { PromptInputSection } from './prompt-input-section';
 import { SlideUploadSection } from './slide-upload-section';
+import { getAuthToken } from '@/lib/workspace-storage';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
 
 const readFileAsDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -18,15 +20,18 @@ const readFileAsDataUrl = (file: File) =>
   });
 
 export function ControlPanel() {
-  const { project, updateProject } = useWorkspaceProject();
+  const { project, updateProject, renameProject } = useWorkspaceProject();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleRename = (nextName: string) => {
+  const handleRename = async (nextName: string) => {
     const trimmed = nextName.trim();
-    updateProject({
-      name: trimmed.length ? trimmed : 'Untitled project',
-    });
+    const name = trimmed.length ? trimmed : 'Untitled project';
+    try {
+      await renameProject(name);
+    } catch {
+      updateProject({ name });
+    }
   };
 
   const handleSlideUpload = async (file: File) => {
@@ -46,6 +51,22 @@ export function ControlPanel() {
       updateProject({
         slideImage: dataUrl,
       });
+      const authToken = getAuthToken();
+      if (!authToken) {
+        return;
+      }
+      const response = await fetch(`${API_BASE_URL}/projects/${project.id}/slide-image`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ slide_image_base64: dataUrl }),
+      });
+      if (!response.ok) {
+        return;
+      }
+      await response.json();
     } catch {
       setUploadError('Could not load the selected image. Try again.');
     } finally {
@@ -58,6 +79,15 @@ export function ControlPanel() {
     updateProject({
       slideImage: undefined,
     });
+    const authToken = getAuthToken();
+    if (authToken) {
+      void fetch(`${API_BASE_URL}/projects/${project.id}/slide-image`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+    }
   };
 
   return (

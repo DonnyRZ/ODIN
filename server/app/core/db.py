@@ -940,6 +940,42 @@ def get_payment_order_by_idempotency_key(
   return dict(row) if row else None
 
 
+def get_open_payment_order_for_user(
+  conn: sqlite3.Connection,
+  *,
+  user_id: str,
+) -> Optional[dict]:
+  row = conn.execute(
+    """
+    SELECT
+      order_id,
+      user_id,
+      idempotency_key,
+      plan_id,
+      gross_amount,
+      currency,
+      customer_name,
+      customer_email,
+      customer_phone,
+      status,
+      snap_token,
+      transaction_status,
+      fraud_status,
+      status_code,
+      created_at,
+      updated_at,
+      paid_at,
+      last_notification_json
+    FROM payment_orders
+    WHERE user_id = ? AND status NOT IN ('PAID', 'FAILED', 'REFUNDED')
+    ORDER BY created_at DESC
+    LIMIT 1
+    """,
+    (user_id,),
+  ).fetchone()
+  return dict(row) if row else None
+
+
 def update_payment_order_token(
   conn: sqlite3.Connection,
   *,
@@ -983,6 +1019,23 @@ def update_payment_order_processing_status(
     WHERE order_id = ?
     """,
     (status, updated_at, order_id),
+  )
+  return cursor.rowcount > 0
+
+
+def update_payment_order_expired(
+  conn: sqlite3.Connection,
+  *,
+  order_id: str,
+  updated_at: str,
+) -> bool:
+  cursor = conn.execute(
+    """
+    UPDATE payment_orders
+    SET status = ?, updated_at = ?, snap_token = NULL
+    WHERE order_id = ?
+    """,
+    ("FAILED", updated_at, order_id),
   )
   return cursor.rowcount > 0
 

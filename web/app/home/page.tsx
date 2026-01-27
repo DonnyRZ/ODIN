@@ -41,7 +41,7 @@ function OnboardingPageContent() {
             <div className="brand-mark">
               <img src={logoSrc} alt="ODIN logo" onError={handleLogoError} />
             </div>
-            <div className="brand-text">ODIN</div>
+            <div className="brand-text">ODIN Labs</div>
           </div>
           <nav className="menu">
             <Link href="/pricing">Pricing</Link>

@@ -30,6 +30,7 @@ from .core.db import (
   get_user_by_username,
   get_latest_payment_event,
   get_payment_order_by_idempotency_key,
+  get_open_payment_order_for_user,
   get_latest_active_subscription_period,
   get_or_create_project,
   get_project,
@@ -52,6 +53,7 @@ from .core.db import (
   get_payment_order,
   get_subscription_period_by_order_id,
   update_payment_order_processing_status,
+  update_payment_order_expired,
   update_payment_order_status,
   update_payment_order_token,
   update_subscription_period_status,
@@ -124,20 +126,27 @@ def _sse_event(event: str, payload: dict) -> bytes:
 def _require_user_id(request: Request) -> str:
   auth_header = request.headers.get("Authorization", "")
   if not auth_header.startswith("Bearer "):
-    settings = get_settings()
-    if settings.allow_unauthenticated_generate and request.url.path.endswith("/generate"):
-      return "anonymous"
     raise HTTPException(status_code=401, detail="Authorization required.")
   token = auth_header.replace("Bearer ", "").strip()
   now = datetime.utcnow().isoformat() + "Z"
   with db_connection() as conn:
     user_id = get_user_id_for_token(conn, token, now)
   if not user_id:
-    settings = get_settings()
-    if settings.allow_unauthenticated_generate and request.url.path.endswith("/generate"):
-      return "anonymous"
     raise HTTPException(status_code=401, detail="Invalid or expired session.")
   return user_id
+
+
+def _require_active_subscription(user_id: str) -> None:
+  now = datetime.utcnow()
+  with db_connection() as conn:
+    subscription = get_subscription(conn, user_id)
+  if not subscription:
+    raise HTTPException(status_code=403, detail="Active subscription required.")
+  if subscription.get("status") != "active":
+    raise HTTPException(status_code=403, detail="Active subscription required.")
+  current_period_end = _parse_iso_datetime(subscription.get("current_period_end"))
+  if current_period_end and current_period_end <= now:
+    raise HTTPException(status_code=403, detail="Subscription expired.")
 
 
 def _send_welcome_email(email: str, username: str) -> None:
@@ -278,6 +287,24 @@ def _map_subscription_status(payment_status: str) -> str:
   return "pending"
 
 
+def _plan_price(plan_id: str | None) -> Optional[int]:
+  if not plan_id:
+    return None
+  for plan in get_plan_catalog():
+    if plan.id == plan_id:
+      return plan.price_idr
+  return None
+
+
+def _order_is_expired(order: dict, now: datetime, *, ttl_seconds: int) -> bool:
+  updated_at = _parse_iso_datetime(order.get("updated_at"))
+  created_at = _parse_iso_datetime(order.get("created_at"))
+  base = updated_at or created_at
+  if not base:
+    return False
+  return (now - base).total_seconds() > ttl_seconds
+
+
 def _parse_iso_datetime(value: str | None) -> datetime | None:
   if not value:
     return None
@@ -305,18 +332,25 @@ def _select_subscription_snapshot(periods: list[dict], now: datetime) -> Optiona
     parsed = _parse_iso_datetime(period.get("period_end"))
     return parsed if parsed else datetime.min
 
+  def period_start_dt(period: dict) -> datetime:
+    parsed = _parse_iso_datetime(period.get("period_start"))
+    return parsed if parsed else datetime.min
+
+  eligible_periods = [
+    period for period in periods if period_start_dt(period) <= now
+  ]
   active_candidates = [
     period
-    for period in periods
+    for period in eligible_periods
     if period.get("status") == "active" and period_end_dt(period) > now
   ]
   if active_candidates:
     selected = max(active_candidates, key=period_end_dt)
     status = "active"
   else:
-    if not periods:
+    if not eligible_periods:
       return None
-    selected = max(periods, key=period_end_dt)
+    selected = max(eligible_periods, key=period_end_dt)
     status = "canceled"
 
   selected_end = period_end_dt(selected)
@@ -425,6 +459,7 @@ async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) 
   status_check_order_id: Optional[str] = None
   status_check_existing: Optional[dict] = None
   processing_timeout_seconds = 120
+  order_expiry_seconds = 60 * 30
 
   with db_connection() as conn:
     existing = get_payment_order_by_idempotency_key(
@@ -441,6 +476,17 @@ async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) 
         )
       if existing.get("status") in ("PAID", "REFUNDED"):
         raise HTTPException(status_code=409, detail="Payment already completed.")
+      if _order_is_expired(existing, now_dt, ttl_seconds=order_expiry_seconds):
+        update_payment_order_expired(
+          conn,
+          order_id=order_id,
+          updated_at=now,
+        )
+        existing = {
+          **existing,
+          "status": "FAILED",
+          "snap_token": None,
+        }
       existing_token = existing.get("snap_token")
       if existing_token:
         return PaymentTokenResponse(
@@ -502,6 +548,26 @@ async def create_midtrans_token(request: Request, payload: PaymentTokenRequest) 
             detail="Payment sedang diproses. Coba lagi sebentar.",
           )
     else:
+      open_order = get_open_payment_order_for_user(conn, user_id=user_id)
+      if open_order:
+        if _order_is_expired(open_order, now_dt, ttl_seconds=order_expiry_seconds):
+          update_payment_order_expired(
+            conn,
+            order_id=str(open_order["order_id"]),
+            updated_at=now,
+          )
+        else:
+          open_token = open_order.get("snap_token")
+          if open_token:
+            return PaymentTokenResponse(
+              order_id=str(open_order["order_id"]),
+              token=open_token,
+              redirect_url=None,
+            )
+          raise HTTPException(
+            status_code=409,
+            detail="Payment sedang diproses. Selesaikan pembayaran sebelumnya.",
+          )
       order_id = _generate_order_id(plan.id)
       while get_payment_order(conn, order_id):
         order_id = _generate_order_id(plan.id)
@@ -795,10 +861,31 @@ async def midtrans_notification(request: Request):
             )
         else:
           latest_active = get_latest_active_subscription_period(conn, user_id=user_id)
-          started_at, current_period_end = _next_billing_period(
+          current_period_end = _parse_iso_datetime(
             latest_active.get("period_end") if latest_active else None,
-            now_dt,
           )
+          subscription = get_subscription(conn, user_id)
+          current_plan_id = None
+          if subscription and subscription.get("status") == "active":
+            current_plan_id = subscription.get("plan_id")
+          current_plan_price = _plan_price(current_plan_id)
+          new_plan_price = _plan_price(order.get("plan_id"))
+
+          period_start_dt = now_dt
+          if current_period_end and current_period_end > now_dt:
+            if (
+              current_plan_price is not None
+              and new_plan_price is not None
+              and new_plan_price > current_plan_price
+            ):
+              period_start_dt = now_dt
+            else:
+              period_start_dt = current_period_end
+
+          period_end_base = period_start_dt
+          if period_start_dt == now_dt and current_period_end and current_period_end > now_dt:
+            period_end_base = current_period_end
+          period_end_dt = period_end_base + timedelta(days=30)
           create_subscription_period(
             conn,
             period_id=str(uuid4()),
@@ -806,8 +893,8 @@ async def midtrans_notification(request: Request):
             order_id=str(order_id),
             plan_id=order.get("plan_id") or "unknown",
             status="active",
-            period_start=started_at,
-            period_end=current_period_end,
+            period_start=period_start_dt.isoformat() + "Z",
+            period_end=period_end_dt.isoformat() + "Z",
             created_at=now,
             updated_at=now,
           )
@@ -1039,6 +1126,7 @@ async def generate_visuals(request: Request, payload: GenerateRequest):
     raise HTTPException(status_code=400, detail="Slide image is required.")
 
   owner_id = _require_user_id(request)
+  _require_active_subscription(owner_id)
 
   async def event_stream():
     with db_connection() as conn:

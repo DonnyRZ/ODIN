@@ -125,6 +125,7 @@
         font-size: 36px;
         line-height: 1;
         color: #0f172a;
+        text-transform: none;
       }
 
       .brand-mark img {

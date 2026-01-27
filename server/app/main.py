@@ -73,7 +73,7 @@ from .schemas import (
 from .plans import get_plan_catalog
 from .services.email_client import send_email
 from .services.genai_client import genai_client
-from .services.rembg_client import remove_background
+from .services.chromakey_client import process_chromakey
 
 
 def _allowed_origins() -> list[str]:
@@ -98,6 +98,8 @@ router = APIRouter(prefix="/api")
 
 logger = logging.getLogger("odin")
 logger.setLevel(logging.INFO)
+
+MAX_CHROMAKEY_RETRIES = 2
 
 _auth_requests: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 
@@ -126,17 +128,26 @@ def _sse_event(event: str, payload: dict) -> bytes:
 def _require_user_id(request: Request) -> str:
   auth_header = request.headers.get("Authorization", "")
   if not auth_header.startswith("Bearer "):
+    settings = get_settings()
+    if settings.allow_unauthenticated_generate:
+      return "local-dev"
     raise HTTPException(status_code=401, detail="Authorization required.")
   token = auth_header.replace("Bearer ", "").strip()
   now = datetime.utcnow().isoformat() + "Z"
   with db_connection() as conn:
     user_id = get_user_id_for_token(conn, token, now)
   if not user_id:
+    settings = get_settings()
+    if settings.allow_unauthenticated_generate:
+      return "local-dev"
     raise HTTPException(status_code=401, detail="Invalid or expired session.")
   return user_id
 
 
 def _require_active_subscription(user_id: str) -> None:
+  settings = get_settings()
+  if settings.allow_unauthenticated_generate:
+    return
   now = datetime.utcnow()
   with db_connection() as conn:
     subscription = get_subscription(conn, user_id)
@@ -1158,32 +1169,53 @@ async def generate_visuals(request: Request, payload: GenerateRequest):
       logger.info("Enhanced prompt: %s", final_prompt)
 
       for idx in range(1, payload.variant_count + 1):
-        try:
-          image_start = perf_counter()
-          semi_images = genai_client.generate_images(
-            prompt=final_prompt,
-            aspect_ratio=payload.aspect_ratio,
-            count=1,
-          )
+        attempt = 0
+        transparent = None
+        while True:
+          try:
+            image_start = perf_counter()
+            semi_images = genai_client.generate_images(
+              prompt=final_prompt,
+              aspect_ratio=payload.aspect_ratio,
+              count=1,
+              chromakey_retry=attempt,
+            )
+            logger.info("Image generation took %.2fs for image %s attempt %s", perf_counter() - image_start, idx, attempt + 1)
+            raw_image = semi_images[0]
+          except Exception as exc:
+            logger.exception("Image generation failed")
+            yield _sse_event("error", {"message": str(exc)})
+            return
+
+          chromakey_start = perf_counter()
+          try:
+            transparent, metrics = process_chromakey(raw_image)
+          except Exception as exc:
+            logger.exception("Chromakey removal failed")
+            yield _sse_event("error", {"message": str(exc)})
+            return
+          logger.info("Chromakey removal for image %s attempt %s took %.2fs", idx, attempt + 1, perf_counter() - chromakey_start)
           logger.info(
-            "Image generation took %.2fs for image %s",
-            perf_counter() - image_start,
+            "Chromakey metrics for image %s attempt %s: border=%.3f subject=%.3f passed=%s",
             idx,
+            attempt + 1,
+            metrics.border_green_ratio,
+            metrics.subject_ratio,
+            metrics.passed,
           )
-          raw_image = semi_images[0]
-        except Exception as exc:
-          logger.exception("Image generation failed")
-          yield _sse_event("error", {"message": str(exc)})
+          if metrics.passed:
+            break
+
+          attempt += 1
+          if attempt > MAX_CHROMAKEY_RETRIES:
+            yield _sse_event("error", {"message": "Chromakey quality gate failed after retries."})
+            return
+          logger.info("Retrying image generation for image %s (attempt %s)", idx, attempt + 1)
+
+        if transparent is None:
+          yield _sse_event("error", {"message": "Chromakey processing failed."})
           return
 
-        rembg_start = perf_counter()
-        try:
-          transparent = remove_background(raw_image)
-        except Exception as exc:
-          logger.exception("Background removal failed")
-          yield _sse_event("error", {"message": str(exc)})
-          return
-        logger.info("Background removal for image %s took %.2fs", idx, perf_counter() - rembg_start)
         encoded = base64.b64encode(transparent).decode("ascii")
         generation_id = str(uuid4())
         image_path = save_generated_image(transparent, generation_id)

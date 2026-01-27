@@ -1,0 +1,131 @@
+ 
+Transparent PNG Stickers with Nano Banana Pro and Gemini interactions API
+Generating images is easy. Getting clean transparent backgrounds for actual use, stickers, overlays, print-on-demand, is harder than it should be.
+This guide shows how to generate production-ready transparent stickers using the Gemini Interactions API. The trick: generate on chromakey green, strip it with HSV detection.
+ 	 
+
+The Stack
+•	SDK: google-genai
+•	Model: gemini-3-pro-image-preview
+•	Docs: Gemini Interactions API
+•	Dependencies: pillow, scipy, numpy
+Prerequisites
+•	Python 3.10+
+•	Gemini API key (set as GOOGLE_API_KEY env variable)
+•	~3-5 seconds per generation
+Bash: pip install google-genai pillow scipy numpy
+Why Chromakey Instead of ML Background Removal?
+•	ML Background Removal: Uses extra model call to remove the background. Slower and more expensive. Edge Quality can be hit or miss.
+•	Chromakey + HSV: Uses a chromakey green background. Faster, cheaper, and more predictable. Excellent Edge Quality with white outline.
+When you control generation, prompting for a specific background color beats running another model. Faster, cheaper, and more predictable.
+The Prompt
+The prompt does the heavy lifting. A white outline creates a buffer zone that prevents color bleeding between subject and background.
+Python:
+enhanced_prompt = f"""Create a sticker illustration of: {prompt}
+CRITICAL CHROMAKEY REQUIREMENTS:
+1. BACKGROUND: Solid, flat, uniform chromakey green color. Use EXACTLY hex color #00FF00 (RGB 0, 255, 0).
+ The entire background must be this single pure green color with NO variation, NO gradients, NO shadows, NO lighting effects.
+2. WHITE OUTLINE: The subject MUST have a clean white outline/border (2-3 pixels wide) separating it from the green background.
+This white border prevents color bleeding between the subject and background.
+3. NO GREEN ON SUBJECT: The subject itself should NOT contain any green colors to avoid confusion with the chromakey.
+If the subject needs green (like leaves), use a distinctly different shade like dark forest green or teal.
+4. SHARP EDGES: The subject should have crisp, sharp, well-defined edges - no soft or blurry boundaries.
+5. CENTERED: Subject should be centered with padding around all sides.
+6. STYLE: Vibrant, clean, cartoon/illustration sticker style with bold colors.
+This is for chromakey extraction - the green background will be removed programmatically."""
+⚠️ Why the white outline matters: Without it, anti-aliased edges blend subject pixels with green, creating halos after removal. The white buffer absorbs this blending.
+Generation
+Python:
+from google import genai
+client = genai.Client()
+def generate_sticker(prompt: str, image_size: str = "2K") -> Image.Image:
+    """Generate sticker with chromakey green background."""
+    interaction = client.interactions.create(
+        model="gemini-3-pro-image-preview",
+        input=enhanced_prompt,
+        generation_config={
+            "image_config": {
+                "aspect_ratio": "1:1",
+                "image_size": image_size  # 2K gives cleaner edges than 4K
+            }
+        }
+    )
+    for output in interaction.outputs:
+        if output.type == "image":
+            return decode_image(output.data)
+    raise ValueError("No image generated")
+Green Screen Removal (HSV)
+RGB makes "detect all greens" hard. Is (50, 200, 50) green? What about (100, 180, 80)?
+HSV separates hue from brightness. Green = ~120° on the hue wheel. We detect by hue range, not exact pixel match.
+Python:
+def remove_green_screen_hsv(
+    image: Image.Image,
+    hue_center: float = 120,    # Pure green = 120°
+    hue_range: float = 25,      # Tight range - only chromakey green
+    min_saturation: float = 75, # High - preserves logo greens
+    min_value: float = 70,      # Only bright greens
+    dilation_iterations: int = 2
+) -> Image.Image:
+    """Remove chromakey green using HSV detection."""
+    data = np.array(image.convert('RGBA'))
+    hsv = rgb_to_hsv_array(data[:, :, :3])
+    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+    # Hue distance (circular)
+    hue_diff = np.abs(h - hue_center)
+    hue_diff = np.minimum(hue_diff, 360 - hue_diff)
+    # Green if: hue in range AND saturated AND bright
+    green_mask = (
+        (hue_diff < hue_range) &
+        (s > min_saturation) &
+        (v > min_value)
+    )
+    # Dilate to catch anti-aliased edge pixels
+    from scipy import ndimage
+    if dilation_iterations > 0:
+        green_mask = ndimage.binary_dilation(green_mask, iterations=dilation_iterations)
+    # Apply transparency
+    alpha = data[:, :, 3].copy()
+    alpha[green_mask] = 0
+    data[:, :, 3] = alpha
+    return Image.fromarray(data)
+Parameter tuning:
+•	min_saturation=75 preserves greens in logos/subjects (they're usually less saturated than pure #00FF00)
+•	dilation_iterations=2 catches anti-aliased edge pixels without eating into the subject
+Complete Pipeline
+Python:
+def create_sticker(prompt: str, output_filename: str) -> Image.Image:
+    """Generate transparent sticker end-to-end."""
+    # Generate with chromakey prompt
+    raw_image = generate_sticker(prompt)
+    # HSV-based green removal
+    print("🔧 Removing green screen...")
+    transparent = remove_green_screen_hsv(raw_image)
+    # Clean semi-transparent edges
+    print("✨ Cleaning edges...")
+    transparent = cleanup_edges(transparent, threshold=64)
+    # Save
+    transparent.save(output_filename, 'PNG')
+    print(f"✅ Saved: {output_filename}")
+    return transparent
+Usage
+Text prompt:
+Python:
+sticker = create_sticker(
+    prompt="a cute happy cat with big eyes",
+    output_filename="cat.png"
+)
+Image-to-sticker (convert existing photo):
+Python:
+sticker = create_sticker(
+    prompt="Convert this photo to a cute sticker style",
+    output_filename="converted.png",
+    input_images=["photo.jpg"]
+)
+The PNG has a proper alpha channel—works in Figma, Photoshop, chat apps, print-on-demand.
+ 
+Known Limitations
+| Issue | Cause | Workaround |
+|-------|-------|------------|
+| **Subjects with green** | Frog/plant stickers lose body parts | Prompt for teal/forest green instead |
+| **Unwanted shadows** | Model adds gradients despite prompt | Usually caught by dilation, not 100% |
+| **Edge halos** | Insufficient white outline | Increase `dilation_iterations` or re-prompt |

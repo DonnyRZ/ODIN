@@ -62,6 +62,9 @@ export default function App() {
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [pendingSlots, setPendingSlots] = useState(0);
   const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
+  const [authToken, setAuthToken] = useState<string>('');
+  const [subscriptionStatus, setSubscriptionStatus] = useState<'unknown' | 'active' | 'inactive'>('unknown');
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const resetTimerRef = useRef<number | null>(null);
 
@@ -71,10 +74,14 @@ export default function App() {
     const storage = (window as { chrome?: any }).chrome?.storage?.sync;
     if (!storage) {
       setApiBaseUrl(DEFAULT_API_BASE_URL);
+      setAuthToken('');
       return;
     }
-    storage.get({ apiBaseUrl: DEFAULT_API_BASE_URL }, (result: { apiBaseUrl?: string }) => {
+    storage.get(
+      { apiBaseUrl: DEFAULT_API_BASE_URL, authToken: '' },
+      (result: { apiBaseUrl?: string; authToken?: string }) => {
       setApiBaseUrl(result.apiBaseUrl || DEFAULT_API_BASE_URL);
+      setAuthToken(result.authToken || '');
     });
   }, []);
 
@@ -85,6 +92,52 @@ export default function App() {
       }
     };
   }, []);
+
+  const normalizeApiBaseUrl = (value: string) => {
+    const trimmed = value.trim().replace(/\/+$/, '');
+    if (trimmed.endsWith('/api')) {
+      return trimmed;
+    }
+    return `${trimmed}/api`;
+  };
+
+  const resolvedApiBaseUrl = useMemo(() => normalizeApiBaseUrl(apiBaseUrl), [apiBaseUrl]);
+
+  useEffect(() => {
+    if (!authToken) {
+      setSubscriptionStatus('inactive');
+      setAuthNotice('Login diperlukan. Simpan token akun ODIN di Settings extension.');
+      return;
+    }
+    let isMounted = true;
+    setAuthNotice(null);
+    setSubscriptionStatus('unknown');
+    fetch(`${resolvedApiBaseUrl}/subscriptions/me`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('Subscription inactive');
+        }
+        const data = (await response.json()) as { status?: string };
+        const active = data?.status === 'active';
+        if (isMounted) {
+          setSubscriptionStatus(active ? 'active' : 'inactive');
+          if (!active) {
+            setAuthNotice('Subscription tidak aktif. Silakan upgrade untuk memakai side panel.');
+          }
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setSubscriptionStatus('inactive');
+          setAuthNotice('Subscription tidak aktif atau token tidak valid.');
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [authToken, resolvedApiBaseUrl]);
 
   const handleCopy = async (id: string, imageUrl: string) => {
     try {
@@ -125,6 +178,14 @@ export default function App() {
   };
 
   const handleGenerate = async () => {
+    if (!authToken) {
+      setFormError('Login diperlukan. Simpan token akun ODIN di Settings extension.');
+      return;
+    }
+    if (subscriptionStatus !== 'active') {
+      setFormError('Subscription tidak aktif. Silakan upgrade untuk menggunakan side panel.');
+      return;
+    }
     if (!slideImage) {
       setFormError('Upload a slide screenshot first.');
       return;
@@ -135,10 +196,11 @@ export default function App() {
     setPendingSlots(variantCount);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/generate`, {
+      const response = await fetch(`${resolvedApiBaseUrl}/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
           project_name: projectName,
@@ -250,9 +312,16 @@ export default function App() {
           <div className="upload__actions">
             <label className="pill pill--file">
               Browse
-              <input type="file" accept="image/png,image/png" onChange={handleFileChange} />
+              <input type="file" accept="image/png,image/jpeg" onChange={handleFileChange} />
             </label>
-            <button className="pill pill--ghost" type="button">
+            <button
+              className="pill pill--ghost"
+              type="button"
+              onClick={() => {
+                setSlideImage(null);
+                setFormError(null);
+              }}
+            >
               Clear
             </button>
           </div>
@@ -312,8 +381,11 @@ export default function App() {
         {formError ? (
           <p className="panel__error">{formError}</p>
         ) : (
-        <p className="panel__subtext">API: {apiBaseUrl}</p>
+        <p className="panel__subtext">API: {resolvedApiBaseUrl}</p>
         )}
+        {authNotice ? (
+          <p className="panel__subtext">{authNotice}</p>
+        ) : null}
       </section>
 
       <section className="panel__section panel__section--results">
@@ -322,7 +394,14 @@ export default function App() {
             <p className="panel__eyebrow">Results</p>
             <p className="panel__subtext">Latest visuals appear here.</p>
           </div>
-          <button className="ghost-button" type="button">
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => {
+              setResults([]);
+              setPendingSlots(0);
+            }}
+          >
             Clear
           </button>
         </div>

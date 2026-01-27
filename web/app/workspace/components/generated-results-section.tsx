@@ -34,7 +34,7 @@ const copyImage = async (dataUrl: string) => {
 };
 
 export function GeneratedResultsSection() {
-  const { project } = useWorkspaceProject();
+  const { project, updateProject } = useWorkspaceProject();
   const isGenerating = project.generationStatus === 'generating';
   const visibleResults = [...project.results].slice(-12).reverse();
   const placeholders = Array.from({ length: project.pendingSlots });
@@ -82,9 +82,17 @@ export function GeneratedResultsSection() {
           <button
             type="button"
             disabled={isGenerating}
+            onClick={() => {
+              updateProject({
+                results: [],
+                pendingSlots: 0,
+                generationStatus: 'idle',
+                generationError: null,
+              });
+            }}
             className="rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-600 hover:border-gray-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:text-gray-400"
           >
-            Refresh
+            Clear results
           </button>
         </header>
         {hasError && (

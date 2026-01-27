@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
 } from 'react';
 import {
   WorkspaceGenerationResult,
@@ -41,6 +42,7 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
   const [project, setProject] = useState<WorkspaceProject>(() => createDefaultWorkspaceProject());
   const [isHydrated, setIsHydrated] = useState(false);
   const searchParams = useSearchParams();
+  const autosaveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const authToken = getAuthToken();
@@ -198,8 +200,23 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
         ...prev,
         ...updates,
         updatedAt: new Date().toISOString(),
+        autosaveStatus: 'saving' as WorkspaceProject['autosaveStatus'],
       };
       persistWorkspaceProject(next);
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+      }
+      autosaveTimerRef.current = window.setTimeout(() => {
+        setProject((current) => {
+          if (current.autosaveStatus === 'ready') {
+            return current;
+          }
+          const readyState = { ...current, autosaveStatus: 'ready' as WorkspaceProject['autosaveStatus'] };
+          persistWorkspaceProject(readyState);
+          return readyState;
+        });
+        autosaveTimerRef.current = null;
+      }, 600);
       return next;
     });
   }, []);
@@ -210,8 +227,23 @@ export function WorkspaceProjectProvider({ children }: { children: ReactNode }) 
         ...prev,
         prompt,
         updatedAt: new Date().toISOString(),
+        autosaveStatus: 'saving' as WorkspaceProject['autosaveStatus'],
       };
       persistWorkspaceProject(next);
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+      }
+      autosaveTimerRef.current = window.setTimeout(() => {
+        setProject((current) => {
+          if (current.autosaveStatus === 'ready') {
+            return current;
+          }
+          const readyState = { ...current, autosaveStatus: 'ready' as WorkspaceProject['autosaveStatus'] };
+          persistWorkspaceProject(readyState);
+          return readyState;
+        });
+        autosaveTimerRef.current = null;
+      }, 600);
       return next;
     });
   }, []);

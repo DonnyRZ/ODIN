@@ -50,6 +50,30 @@ const STATUS_COPY: Record<string, StatusCopy> = {
   },
 };
 
+const formatOptional = (value?: string | null) => {
+  if (!value) {
+    return 'N/A';
+  }
+  return value;
+};
+
+const formatTimestamp = (value?: string | null) => {
+  if (!value) {
+    return 'N/A';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'N/A';
+  }
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
 const formatIdr = (value: number) => `Rp${value.toLocaleString('id-ID')}`;
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
 
@@ -59,6 +83,7 @@ export default function PaymentStatusClient() {
   const [status, setStatus] = useState<PaymentStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [redirectCountdown, setRedirectCountdown] = useState(0);
 
   const mappedStatus = useMemo(() => {
     const key = (status?.status ?? 'unknown').toLowerCase();
@@ -109,6 +134,24 @@ export default function PaymentStatusClient() {
     };
   }, [orderId]);
 
+  useEffect(() => {
+    if (mappedStatus !== 'paid') {
+      setRedirectCountdown(0);
+      return;
+    }
+    setRedirectCountdown(3);
+    const timer = window.setInterval(() => {
+      setRedirectCountdown((prev) => {
+        if (prev <= 1) {
+          window.location.href = '/workspace';
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [mappedStatus]);
+
   return (
     <main className="page">
       <div className="container">
@@ -145,18 +188,23 @@ export default function PaymentStatusClient() {
                 </div>
               ) : null}
               <div>
-                <strong>Status transaksi:</strong> {status.transaction_status ?? '—'}
+                <strong>Status transaksi:</strong> {formatOptional(status.transaction_status)}
               </div>
               <div>
-                <strong>Fraud status:</strong> {status.fraud_status ?? '—'}
+                <strong>Fraud status:</strong> {formatOptional(status.fraud_status)}
               </div>
               <div>
-                <strong>Updated:</strong> {status.updated_at ?? '—'}
+                <strong>Updated:</strong> {formatTimestamp(status.updated_at)}
               </div>
             </div>
           ) : null}
 
           <div className="cta-row">
+            {mappedStatus === 'paid' ? (
+              <Link className="btn" href="/workspace">
+                Buka workspace
+              </Link>
+            ) : null}
             <Link className="btn" href="/pricing">
               Lihat pricing
             </Link>
@@ -164,6 +212,11 @@ export default function PaymentStatusClient() {
               Hubungi kami
             </Link>
           </div>
+          {mappedStatus === 'paid' && redirectCountdown > 0 ? (
+            <p className="helper">
+              Anda akan dialihkan ke workspace dalam {redirectCountdown} detik.
+            </p>
+          ) : null}
         </section>
       </div>
     </main>
